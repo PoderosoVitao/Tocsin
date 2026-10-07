@@ -9,6 +9,15 @@ requires-python = ">=3.12"
 # job never pulls in (or breaks on) the server stack.
 dependencies = []
 
+[project.optional-dependencies]
+server = [
+    "alembic>=1.13",
+    "asyncpg>=0.29",
+    "pydantic>=2.5",
+    "pydantic-settings>=2.2",
+    "sqlalchemy[asyncio]>=2.0",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -22,6 +31,7 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.6",
     "mypy>=1.10",
+    "pgserver>=0.1.4",
 ]
 
 [tool.ruff]
