@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     # the links inside alert messages.
     public_url: str = "http://localhost:8000"
 
+    # How much of a job's output (the body of a finish ping) to keep per run.
+    # The end of the output is kept, since that is where errors are.
+    output_tail_bytes: int = 10_000
+
 
 @lru_cache
 def get_settings() -> Settings:

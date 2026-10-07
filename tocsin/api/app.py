@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Depends, FastAPI
 
-from tocsin.api import checks
+from tocsin.api import checks, ping
 from tocsin.api.deps import require_api_key
 from tocsin.config import Settings, get_settings
 from tocsin.db import Sessionmaker, create_engine, create_sessionmaker
@@ -35,4 +35,5 @@ def create_app(
     api = APIRouter(prefix="/api", dependencies=[Depends(require_api_key)])
     api.include_router(checks.router)
     app.include_router(api)
+    app.include_router(ping.router)
     return app
