@@ -5,11 +5,15 @@ import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+import httpx
 import pytest
 import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from tocsin.api.app import create_app
+from tocsin.apikeys import create_key
+from tocsin.config import Settings
 from tocsin.db import Sessionmaker, create_engine, create_sessionmaker, migrate
 from tocsin.models import Base
 
@@ -52,3 +56,28 @@ async def sessionmaker(engine: AsyncEngine) -> Sessionmaker:
     async with engine.begin() as conn:
         await conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
     return create_sessionmaker(engine)
+
+
+@pytest.fixture
+def settings() -> Settings:
+    return Settings(public_url="https://tocsin.test")
+
+
+@pytest_asyncio.fixture
+async def api_key(sessionmaker: Sessionmaker) -> str:
+    async with sessionmaker() as session, session.begin():
+        _, plaintext = await create_key(session, "tests")
+    return plaintext
+
+
+@pytest_asyncio.fixture
+async def client(
+    settings: Settings, sessionmaker: Sessionmaker, api_key: str
+) -> AsyncIterator[httpx.AsyncClient]:
+    app = create_app(settings, sessionmaker)
+    transport = httpx.ASGITransport(app=app)
+    headers = {"Authorization": f"Bearer {api_key}"}
+    async with httpx.AsyncClient(
+        transport=transport, base_url="https://tocsin.test", headers=headers
+    ) as client:
+        yield client
