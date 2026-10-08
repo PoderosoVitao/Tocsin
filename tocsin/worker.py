@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import httpx
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
 from taskiq import AsyncBroker, Context, TaskiqDepends, TaskiqEvents, TaskiqScheduler, TaskiqState
 from taskiq.kicker import AsyncKicker
@@ -18,6 +19,7 @@ from tocsin.channels import Sender
 from tocsin.channels.telegram import TelegramSender
 from tocsin.config import Settings, get_settings
 from tocsin.db import Sessionmaker, create_engine, create_sessionmaker
+from tocsin.sweep import run_sweep
 
 log = logging.getLogger(__name__)
 
@@ -28,14 +30,16 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 DELIVER = "tocsin.deliver"
 RELAY_DELIVERIES = "tocsin.relay_deliveries"
 RELAY_INTERVAL_SECONDS = 5
+SWEEP = "tocsin.sweep"
+SWEEP_INTERVAL_SECONDS = 5
 
 
 def build_senders(http: httpx.AsyncClient, settings: Settings) -> dict[str, Sender]:
     return {"telegram": TelegramSender(http, settings.telegram_api_url)}
 
 
-# What a worker process holds open for its tasks: one database pool and one
-# HTTP client, shared by every task the process runs.
+# What a worker process holds open for its tasks: one database pool, one HTTP
+# client and one Redis client, shared by every task the process runs.
 @dataclass
 class Resources:
     settings: Settings
@@ -43,16 +47,23 @@ class Resources:
     sessionmaker: Sessionmaker
     http: httpx.AsyncClient
     senders: dict[str, Sender]
+    redis: Redis
 
     @classmethod
     def open(cls, settings: Settings) -> Resources:
         engine = create_engine(settings.database_url)
         http = httpx.AsyncClient()
         return cls(
-            settings, engine, create_sessionmaker(engine), http, build_senders(http, settings)
+            settings,
+            engine,
+            create_sessionmaker(engine),
+            http,
+            build_senders(http, settings),
+            Redis.from_url(settings.redis_url),
         )
 
     async def close(self) -> None:
+        await self.redis.aclose()
         await self.http.aclose()
         await self.engine.dispose()
 
@@ -100,6 +111,13 @@ def register_tasks(broker: AsyncBroker, settings: Settings) -> None:
             keys = await claim_due_deliveries(session, datetime.now(UTC))
         await TaskiqDispatcher(context.broker).deliver(keys)
         return len(keys)
+
+    @broker.task(task_name=SWEEP, schedule=[{"interval": SWEEP_INTERVAL_SECONDS}])
+    async def sweep_overdue(context: Context = TaskiqDepends()) -> int:
+        resources: Resources = context.state.resources
+        return await run_sweep(
+            resources.sessionmaker, TaskiqDispatcher(context.broker), resources.redis
+        )
 
 
 # Redis streams with a consumer group: a job a worker took but never
