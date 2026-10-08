@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     # The end of the output is kept, since that is where errors are.
     output_tail_bytes: int = 10_000
 
+    # Pings accepted per check per minute. A job sending start and finish
+    # pings every minute uses two.
+    ping_rate_limit: int = 60
+
 
 @lru_cache
 def get_settings() -> Settings:

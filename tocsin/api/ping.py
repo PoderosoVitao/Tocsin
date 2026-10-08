@@ -8,6 +8,7 @@ from fastapi.responses import PlainTextResponse
 
 from tocsin.api.deps import AppSettings, Session
 from tocsin.pings import Signal, record_ping
+from tocsin.ratelimit import allow
 
 router = APIRouter(tags=["ping"])
 
@@ -34,6 +35,10 @@ async def _handle(
         parsed = Signal.parse(signal)
     except ValueError as exc:
         return PlainTextResponse(str(exc), status_code=400)
+    # Checked before touching the database, so a job stuck in a loop costs one
+    # Redis round trip per ping instead of a row lock.
+    if not await allow(request.app.state.redis, f"ping:{ping_key}", settings.ping_rate_limit):
+        return PlainTextResponse("rate limited", status_code=429, headers={"Retry-After": "60"})
 
     body = await _body_tail(request, settings.output_tail_bytes)
     source_ip = request.client.host if request.client else None

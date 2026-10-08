@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import AsyncIterator
+import socket
+import subprocess
+import time
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import httpx
 import pytest
 import pytest_asyncio
+from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -58,6 +62,52 @@ async def sessionmaker(engine: AsyncEngine) -> Sessionmaker:
     return create_sessionmaker(engine)
 
 
+def _free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port: int = sock.getsockname()[1]
+        return port
+
+
+# Same idea as database_url: TOCSIN_TEST_REDIS_URL in CI, otherwise the
+# redis-server binary bundled in the redislite wheel.
+@pytest.fixture(scope="session")
+def redis_url() -> Iterator[str]:
+    url = os.environ.get("TOCSIN_TEST_REDIS_URL")
+    if url:
+        yield url
+        return
+
+    import redislite
+
+    port = _free_port()
+    server = subprocess.Popen(
+        [redislite.__redis_executable__, "--port", str(port), "--save", "", "--appendonly", "no"],
+        stdout=subprocess.DEVNULL,
+    )
+    url = f"redis://127.0.0.1:{port}/0"
+    for _ in range(100):
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=0.1).close()
+            break
+        except OSError:
+            server.poll()
+            if server.returncode is not None:
+                raise RuntimeError("redis-server exited during startup") from None
+            time.sleep(0.05)
+    yield url
+    server.terminate()
+    server.wait()
+
+
+@pytest_asyncio.fixture
+async def redis(redis_url: str) -> AsyncIterator[Redis]:
+    client = Redis.from_url(redis_url)
+    await client.flushdb()
+    yield client
+    await client.aclose()
+
+
 @pytest.fixture
 def settings() -> Settings:
     return Settings(public_url="https://tocsin.test")
@@ -72,9 +122,9 @@ async def api_key(sessionmaker: Sessionmaker) -> str:
 
 @pytest_asyncio.fixture
 async def client(
-    settings: Settings, sessionmaker: Sessionmaker, api_key: str
+    settings: Settings, sessionmaker: Sessionmaker, redis: Redis, api_key: str
 ) -> AsyncIterator[httpx.AsyncClient]:
-    app = create_app(settings, sessionmaker)
+    app = create_app(settings, sessionmaker, redis)
     transport = httpx.ASGITransport(app=app)
     headers = {"Authorization": f"Bearer {api_key}"}
     async with httpx.AsyncClient(
