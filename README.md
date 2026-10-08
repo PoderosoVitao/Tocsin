@@ -3,9 +3,10 @@
 Your cron jobs tell tocsin "I ran". Tocsin tells you when one of them didn't, and for evaluation
 jobs, when the numbers got worse.
 
-> **Status: early work in progress.** The ping API and check management work and are tested.
-> Nothing sends alerts yet; that comes next. The [roadmap](#roadmap) below is kept up to date.
-> Don't rely on this to watch anything important yet.
+> **Status: early work in progress.** Pings, checks and Telegram alerts work and are tested, but
+> missed runs aren't detected yet (the overdue sweep comes next) and channels can't be added through
+> the API yet. The [roadmap](#roadmap) below is kept up to date. Don't rely on this to watch anything
+> important yet.
 
 ## Why another job monitor
 
@@ -36,16 +37,21 @@ Tocsin is built for scheduled AI work, where "it ran" isn't enough:
 
   They accept GET, POST and HEAD. A POST body is kept as the run's output tail (the last 10 KB).
 - State changes (`new`, `up`, `late`, `down`, `paused`) recorded as events.
+- Telegram alerts when a job reports a failure, and when it recovers. Alerts go through a
+  Redis-backed queue ([TaskIQ](https://taskiq-python.github.io/)) and are retried with exponential
+  backoff and jitter. Each (event, channel) pair has one delivery record, so a retried or duplicated
+  job never sends twice, and a delivery whose job was lost is picked up again from the database.
+- Pings are rate-limited per check in Redis, and still accepted if Redis is down.
 - A JSON API for checks (`/api/checks`), protected by API keys.
 
 ## Roadmap
 
 | Phase | Contents | Status |
 |---|---|---|
-| 1. Core | Checks, ping endpoints, API keys | Done |
+| 1. Core | Checks, ping endpoints, API keys, rate limiting | Done |
+| | Telegram alerts through a queue, with retries | Done |
 | | Overdue sweep with row locking, exactly one alert per failure | Next |
-| | Telegram alerts through a queue, with retries | Planned |
-| | Rate limiting, metrics, CI, Docker Compose | Planned |
+| | Channels API, metrics, CI, Docker Compose | Planned |
 | 2. Usable | Start/finish runs and durations, CLI wrapper, flapping rules, self-monitoring | Planned |
 | 3. Dashboard | Overview, check page, alert log, live updates | Planned |
 | 4. Eval checks | Result schema, statistics, alert rules, JUnit and Stochast adapters | Planned |
@@ -61,8 +67,12 @@ uv sync --all-extras
 export TOCSIN_DATABASE_URL=postgresql+asyncpg://user:password@localhost/tocsin
 uv run tocsin migrate
 export KEY=$(uv run tocsin keys create laptop)   # the key is shown only once
-uv run tocsin api
+uv run tocsin api          # in one terminal
+uv run tocsin worker       # in another: delivers alerts
+uv run tocsin scheduler    # and another: runs periodic tasks such as retries
 ```
+
+The worker and scheduler need Redis (`TOCSIN_REDIS_URL`, default `redis://localhost:6379/0`).
 
 Then create a check and ping it:
 
