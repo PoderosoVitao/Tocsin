@@ -5,7 +5,7 @@ import os
 import socket
 import subprocess
 import time
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator, Sequence
 from pathlib import Path
 
 import httpx
@@ -15,6 +15,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from tocsin.alerts import DeliveryKey
 from tocsin.api.app import create_app
 from tocsin.apikeys import create_key
 from tocsin.config import Settings
@@ -108,6 +109,21 @@ async def redis(redis_url: str) -> AsyncIterator[Redis]:
     await client.aclose()
 
 
+# Stands in for the task queue: remembers what would have been queued, so a
+# test can run the deliveries itself and look at every step.
+class RecordingDispatcher:
+    def __init__(self) -> None:
+        self.keys: list[DeliveryKey] = []
+
+    async def deliver(self, keys: Sequence[DeliveryKey]) -> None:
+        self.keys.extend(keys)
+
+
+@pytest.fixture
+def dispatcher() -> RecordingDispatcher:
+    return RecordingDispatcher()
+
+
 @pytest.fixture
 def settings() -> Settings:
     return Settings(public_url="https://tocsin.test")
@@ -122,9 +138,13 @@ async def api_key(sessionmaker: Sessionmaker) -> str:
 
 @pytest_asyncio.fixture
 async def client(
-    settings: Settings, sessionmaker: Sessionmaker, redis: Redis, api_key: str
+    settings: Settings,
+    sessionmaker: Sessionmaker,
+    redis: Redis,
+    dispatcher: RecordingDispatcher,
+    api_key: str,
 ) -> AsyncIterator[httpx.AsyncClient]:
-    app = create_app(settings, sessionmaker, redis)
+    app = create_app(settings, sessionmaker, redis, dispatcher)
     transport = httpx.ASGITransport(app=app)
     headers = {"Authorization": f"Bearer {api_key}"}
     async with httpx.AsyncClient(

@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Depends, FastAPI
 from redis.asyncio import Redis
 
+from tocsin.alerts import Dispatcher
 from tocsin.api import checks, ping
 from tocsin.api.deps import require_api_key
 from tocsin.config import Settings, get_settings
 from tocsin.db import Sessionmaker, create_engine, create_sessionmaker
 from tocsin.redis_client import fast_failing
+
+log = logging.getLogger(__name__)
 
 
 # Builds the API app. Tests pass in their own connections; in production the
@@ -19,6 +23,7 @@ def create_app(
     settings: Settings | None = None,
     sessionmaker: Sessionmaker | None = None,
     redis: Redis | None = None,
+    dispatcher: Dispatcher | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
 
@@ -30,7 +35,22 @@ def create_app(
             app.state.sessionmaker = create_sessionmaker(engine)
         if redis is None:
             app.state.redis = fast_failing(settings.redis_url)
+        broker = None
+        if dispatcher is None:
+            from tocsin.worker import TaskiqDispatcher, create_broker
+
+            broker = create_broker(settings)
+            # The API only enqueues. If Redis is down at startup it should still
+            # take pings: deliveries are in the database and the relay will
+            # queue them once Redis is back.
+            try:
+                await broker.startup()
+            except Exception:
+                log.exception("task broker unavailable at startup; continuing without it")
+            app.state.dispatcher = TaskiqDispatcher(broker)
         yield
+        if broker is not None:
+            await broker.shutdown()
         if redis is None:
             await app.state.redis.aclose()
         if engine is not None:
@@ -40,6 +60,7 @@ def create_app(
     app.state.settings = settings
     app.state.sessionmaker = sessionmaker
     app.state.redis = redis
+    app.state.dispatcher = dispatcher
 
     api = APIRouter(prefix="/api", dependencies=[Depends(require_api_key)])
     api.include_router(checks.router)

@@ -1,24 +1,15 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
 
 import httpx
 import pytest
 from sqlalchemy import select, update
 
+from tests.helpers import create_check
 from tocsin.db import Sessionmaker
 from tocsin.models import Check, Event, Ping, Run
 from tocsin.pings import output_tail
-
-
-async def create_check(client: httpx.AsyncClient, **fields: Any) -> dict[str, Any]:
-    body = {"name": "backup", "schedule": "0 3 * * *", **fields}
-    response = await client.post("/api/checks", json=body)
-    assert response.status_code == 201
-    created: dict[str, Any] = response.json()
-    created["ping_path"] = created["ping_url"].removeprefix("https://tocsin.test")
-    return created
 
 
 async def events(sessionmaker: Sessionmaker) -> list[tuple[str, str, str]]:

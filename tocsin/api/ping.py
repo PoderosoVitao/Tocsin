@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Request
 from fastapi.responses import PlainTextResponse
 
+from tocsin.alerts import dispatch_pending
 from tocsin.api.deps import AppSettings, Session
 from tocsin.pings import Signal, record_ping
 from tocsin.ratelimit import allow
@@ -54,6 +55,7 @@ async def _handle(
     if outcome is None:
         return PlainTextResponse("not found", status_code=404)
     await session.commit()
+    await dispatch_pending(session, request.app.state.dispatcher)
     return PlainTextResponse("OK")
 
 

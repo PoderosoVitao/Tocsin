@@ -5,18 +5,11 @@ from datetime import UTC, datetime
 import httpx
 from sqlalchemy import select, update
 
+from tests.helpers import add_channel
 from tocsin.db import Sessionmaker
-from tocsin.models import ApiKey, Channel, Check, Event
+from tocsin.models import ApiKey, Check, Event
 
 BACKUP = {"name": "backup", "schedule": "0 3 * * *", "timezone": "Europe/Lisbon"}
-
-
-async def add_channel(sessionmaker: Sessionmaker, name: str) -> str:
-    async with sessionmaker() as session, session.begin():
-        channel = Channel(kind="telegram", name=name, config={})
-        session.add(channel)
-        await session.flush()
-        return str(channel.id)
 
 
 async def test_api_requires_a_key(client: httpx.AsyncClient) -> None:

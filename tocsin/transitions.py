@@ -4,14 +4,15 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tocsin.alerts import create_deliveries, should_alert
 from tocsin.models import Check, Event, State
 from tocsin.schedule import next_due
 
 
 # Moves a check to a new state and records the change as an event, in the
-# caller's transaction. Every state change goes through here, so the event
-# log is a complete history and nothing else needs to know how events are
-# written.
+# caller's transaction, along with a pending delivery per channel when the
+# change is one that alerts. Every state change goes through here, so the
+# event log is a complete history and no caller can forget the alert.
 async def transition(
     session: AsyncSession,
     check: Check,
@@ -31,6 +32,8 @@ async def transition(
     check.state = to_state
     session.add(event)
     await session.flush()
+    if should_alert(event.from_state, event.to_state):
+        await create_deliveries(session, event, now)
     return event
 
 

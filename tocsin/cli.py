@@ -94,6 +94,18 @@ def _api(args: argparse.Namespace) -> int:
     return 0
 
 
+# The worker and scheduler are taskiq's own runners pointed at tocsin's broker;
+# extra arguments (such as --workers 2) are passed through to taskiq.
+def _taskiq(command: str, target: str) -> Handler:
+    def run(args: argparse.Namespace) -> int:
+        import os
+
+        argv = [sys.executable, "-m", "taskiq", command, target, *args.taskiq_args]
+        os.execv(sys.executable, argv)
+
+    return run
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tocsin", description="A job monitor that understands AI jobs."
@@ -123,6 +135,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="proxies trusted to set X-Forwarded-For (the ping path records the source IP)",
     )
     api.set_defaults(handler=_api)
+
+    worker = commands.add_parser("worker", help="run a worker (alert delivery, sweeps)")
+    worker.add_argument("taskiq_args", nargs=argparse.REMAINDER)
+    worker.set_defaults(handler=_taskiq("worker", "tocsin.worker:broker"))
+
+    scheduler = commands.add_parser("scheduler", help="run the scheduler for periodic tasks")
+    scheduler.add_argument("taskiq_args", nargs=argparse.REMAINDER)
+    scheduler.set_defaults(handler=_taskiq("scheduler", "tocsin.worker:scheduler"))
     return parser
 
 
