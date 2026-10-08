@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Self
+from typing import Any, Self
 
 from pydantic import BaseModel, Field, model_validator
 
-from tocsin.models import Check, CheckKind, State
+from tocsin.channels import validate_config
+from tocsin.models import Channel, ChannelKind, Check, CheckKind, State
 from tocsin.schedule import ScheduleError, validate
 from tocsin.transitions import displayed_state
 
@@ -74,4 +75,52 @@ class CheckOut(BaseModel):
             ping_url=f"{public_url.rstrip('/')}/ping/{check.ping_key}",
             channel_ids=channel_ids,
             created_at=check.created_at,
+        )
+
+
+# Config fields that are credentials. They are accepted on input but only a
+# hint of them is ever returned, so an API key that can read channels can't
+# be used to lift the bot token.
+SECRET_FIELDS = {"bot_token", "password", "secret"}
+
+
+def mask_config(config: dict[str, Any]) -> dict[str, Any]:
+    masked = {}
+    for name, value in config.items():
+        if name in SECRET_FIELDS and isinstance(value, str):
+            masked[name] = value[:4] + "…" if len(value) > 8 else "…"
+        else:
+            masked[name] = value
+    return masked
+
+
+class ChannelIn(BaseModel):
+    kind: ChannelKind
+    name: str = Field(min_length=1, max_length=200)
+    config: dict[str, Any]
+    # Adds the channel to every existing check, which is what a single user
+    # adding their first (or a replacement) Telegram chat wants.
+    attach_to_existing_checks: bool = True
+
+    @model_validator(mode="after")
+    def _config_is_valid(self) -> Self:
+        self.config = validate_config(self.kind, self.config)
+        return self
+
+
+class ChannelOut(BaseModel):
+    id: uuid.UUID
+    kind: ChannelKind
+    name: str
+    config: dict[str, Any]
+    created_at: datetime
+
+    @classmethod
+    def build(cls, channel: Channel) -> ChannelOut:
+        return cls(
+            id=channel.id,
+            kind=ChannelKind(channel.kind),
+            name=channel.name,
+            config=mask_config(channel.config),
+            created_at=channel.created_at,
         )

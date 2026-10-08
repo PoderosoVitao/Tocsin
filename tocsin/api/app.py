@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import APIRouter, Depends, FastAPI
 from redis.asyncio import Redis
 
 from tocsin.alerts import Dispatcher
-from tocsin.api import checks, ping
+from tocsin.api import channels, checks, ping
 from tocsin.api.deps import require_api_key
+from tocsin.channels import Sender
 from tocsin.config import Settings, get_settings
 from tocsin.db import Sessionmaker, create_engine, create_sessionmaker
 from tocsin.redis_client import fast_failing
@@ -24,6 +26,7 @@ def create_app(
     sessionmaker: Sessionmaker | None = None,
     redis: Redis | None = None,
     dispatcher: Dispatcher | None = None,
+    senders: Mapping[str, Sender] | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
 
@@ -48,7 +51,15 @@ def create_app(
             except Exception:
                 log.exception("task broker unavailable at startup; continuing without it")
             app.state.dispatcher = TaskiqDispatcher(broker)
+        http = None
+        if senders is None:
+            from tocsin.worker import build_senders
+
+            http = httpx.AsyncClient()
+            app.state.senders = build_senders(http, settings)
         yield
+        if http is not None:
+            await http.aclose()
         if broker is not None:
             await broker.shutdown()
         if redis is None:
@@ -61,9 +72,11 @@ def create_app(
     app.state.sessionmaker = sessionmaker
     app.state.redis = redis
     app.state.dispatcher = dispatcher
+    app.state.senders = senders
 
     api = APIRouter(prefix="/api", dependencies=[Depends(require_api_key)])
     api.include_router(checks.router)
+    api.include_router(channels.router)
     app.include_router(api)
     app.include_router(ping.router)
     return app

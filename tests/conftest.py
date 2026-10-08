@@ -15,6 +15,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from tests.helpers import FakeSender
 from tocsin.alerts import DeliveryKey
 from tocsin.api.app import create_app
 from tocsin.apikeys import create_key
@@ -125,6 +126,11 @@ def dispatcher() -> RecordingDispatcher:
 
 
 @pytest.fixture
+def sender() -> FakeSender:
+    return FakeSender()
+
+
+@pytest.fixture
 def settings() -> Settings:
     return Settings(public_url="https://tocsin.test")
 
@@ -142,9 +148,10 @@ async def client(
     sessionmaker: Sessionmaker,
     redis: Redis,
     dispatcher: RecordingDispatcher,
+    sender: FakeSender,
     api_key: str,
 ) -> AsyncIterator[httpx.AsyncClient]:
-    app = create_app(settings, sessionmaker, redis, dispatcher)
+    app = create_app(settings, sessionmaker, redis, dispatcher, {"telegram": sender})
     transport = httpx.ASGITransport(app=app)
     headers = {"Authorization": f"Bearer {api_key}"}
     async with httpx.AsyncClient(
