@@ -8,6 +8,7 @@ from fastapi.responses import PlainTextResponse
 
 from tocsin.alerts import dispatch_pending
 from tocsin.api.deps import AppSettings, Session
+from tocsin.metrics import PING_SECONDS, PINGS, PINGS_REJECTED
 from tocsin.pings import Signal, record_ping
 from tocsin.ratelimit import allow
 
@@ -26,6 +27,19 @@ async def _body_tail(request: Request, limit: int) -> bytes:
 
 
 async def _handle(
+    request: Request, session: Session, settings: AppSettings, key: str, signal: str | None
+) -> PlainTextResponse:
+    with PING_SECONDS.time():
+        response = await _record(request, session, settings, key, signal)
+    if response.status_code != 200:
+        PINGS_REJECTED.labels(reason=_REJECTIONS.get(response.status_code, "other")).inc()
+    return response
+
+
+_REJECTIONS = {400: "bad_signal", 404: "not_found", 429: "rate_limited"}
+
+
+async def _record(
     request: Request, session: Session, settings: AppSettings, key: str, signal: str | None
 ) -> PlainTextResponse:
     try:
@@ -55,6 +69,7 @@ async def _handle(
     if outcome is None:
         return PlainTextResponse("not found", status_code=404)
     await session.commit()
+    PINGS.labels(kind=parsed.kind).inc()
     await dispatch_pending(session, request.app.state.dispatcher)
     return PlainTextResponse("OK")
 

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tocsin.alerts import Dispatcher, dispatch_pending
 from tocsin.db import Sessionmaker
+from tocsin.metrics import record_sweep
 from tocsin.models import Check, Event, State
 from tocsin.transitions import transition
 
@@ -89,6 +90,7 @@ async def run_sweep(
             total += len(events)
             if len(events) < batch:
                 break
+        await record_sweep(redis)
         return total
     finally:
         if lock is not None:
