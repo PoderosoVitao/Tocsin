@@ -1714,10 +1714,10 @@ server = [
 dev = [
     { name = "httpx" },
     { name = "mypy" },
-    { name = "pgserver" },
+    { name = "pgserver", marker = "python_full_version < '3.13'" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
-    { name = "redislite" },
+    { name = "redislite", marker = "python_full_version < '3.13'" },
     { name = "ruff" },
 ]
 
@@ -1743,10 +1743,10 @@ provides-extras = ["server"]
 dev = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "mypy", specifier = ">=1.10" },
-    { name = "pgserver", specifier = ">=0.1.4" },
+    { name = "pgserver", marker = "python_full_version < '3.13'", specifier = ">=0.1.4" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=0.24" },
-    { name = "redislite", specifier = ">=6.2" },
+    { name = "redislite", marker = "python_full_version < '3.13'", specifier = ">=6.2" },
     { name = "ruff", specifier = ">=0.6" },
 ]
 

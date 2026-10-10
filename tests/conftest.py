@@ -37,7 +37,10 @@ def database_url() -> str:
     if url:
         return url
 
-    import pgserver
+    try:
+        import pgserver
+    except ImportError:
+        pytest.fail("set TOCSIN_TEST_DATABASE_URL (pgserver is only installed on Python 3.12)")
 
     LOCAL_SERVERS.mkdir(exist_ok=True)
     server = pgserver.get_server(LOCAL_SERVERS / "pg", cleanup_mode="stop")
@@ -80,7 +83,10 @@ def redis_url() -> Iterator[str]:
         yield url
         return
 
-    import redislite
+    try:
+        import redislite
+    except ImportError:
+        pytest.fail("set TOCSIN_TEST_REDIS_URL (redislite is only installed on Python 3.12)")
 
     port = _free_port()
     server = subprocess.Popen(
