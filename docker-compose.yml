@@ -1,0 +1,83 @@
+# Everything tocsin needs on one machine. Set TOCSIN_PUBLIC_URL to the address
+# your jobs will reach tocsin at, and POSTGRES_PASSWORD to something private,
+# in a .env file next to this one.
+
+x-tocsin: &tocsin
+  build: .
+  image: tocsin
+  restart: unless-stopped
+  environment:
+    TOCSIN_DATABASE_URL: postgresql+asyncpg://tocsin:${POSTGRES_PASSWORD:-tocsin}@postgres:5432/tocsin
+    TOCSIN_REDIS_URL: redis://redis:6379/0
+    TOCSIN_PUBLIC_URL: ${TOCSIN_PUBLIC_URL:-http://localhost:8000}
+    TOCSIN_DASHBOARD_URL: ${TOCSIN_DASHBOARD_URL:-}
+    TOCSIN_TELEGRAM_API_URL: ${TOCSIN_TELEGRAM_API_URL:-https://api.telegram.org}
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tocsin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tocsin}
+      POSTGRES_DB: tocsin
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tocsin"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    # Append-only persistence, so queued alerts survive a Redis restart. They
+    # are also in Postgres, so this only saves the relay a wait.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # Applies migrations before it starts serving, so the worker and scheduler,
+  # which wait for it to be healthy, always see an up-to-date schema.
+  api:
+    <<: *tocsin
+    command:
+      - sh
+      - -c
+      - tocsin migrate && exec tocsin api --host 0.0.0.0 --forwarded-allow-ips "${TOCSIN_FORWARDED_ALLOW_IPS:-127.0.0.1}"
+    ports:
+      - "${TOCSIN_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  worker:
+    <<: *tocsin
+    command: ["tocsin", "worker"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  scheduler:
+    <<: *tocsin
+    command: ["tocsin", "scheduler"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres:
+  redis:

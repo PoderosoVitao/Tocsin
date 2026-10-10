@@ -1,0 +1,10 @@
+.git
+.github
+.venv
+.tocsin-test
+**/__pycache__
+.pytest_cache
+.ruff_cache
+.mypy_cache
+tests
+Tocsin.md
