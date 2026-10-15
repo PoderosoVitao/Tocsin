@@ -4,8 +4,8 @@ Your cron jobs tell tocsin "I ran". Tocsin tells you when one of them didn't, an
 jobs, when the numbers got worse.
 
 > **Status: work in progress.** The core works and is tested: tocsin notices when a job misses
-> its schedule or reports a failure, and sends exactly one Telegram alert for it. The CLI wrapper,
-> dashboard, evaluation checks and failure summaries are still to come (see the
+> its schedule, fails or runs too long, and sends exactly one Telegram alert for it. The dashboard,
+> evaluation checks and failure summaries are still to come (see the
 > [roadmap](#roadmap)). Tocsin doesn't monitor itself yet, so don't make it the only thing
 > watching something important.
 
@@ -47,15 +47,21 @@ curl -s -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
 curl -s -X POST -H "Authorization: Bearer $KEY" http://localhost:8000/api/channels/<channel id>/test
 ```
 
-Create a check for a job, and have the job ping its URL when it finishes:
+Create a check for a job, and run the job through `tocsin run`:
 
 ```
 curl -s -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
   -d '{"name": "backup", "schedule": "0 3 * * *", "timezone": "Europe/Lisbon", "grace_seconds": 600}' \
   http://localhost:8000/api/checks
-# in the job, report the exit code (0 is success):
-./backup.sh; curl -fsS -m 10 --retry 3 <ping_url>/$?
+# on the machine that runs the job (the base install has no dependencies):
+pipx install git+https://github.com/PoderosoVitao/Tocsin
+tocsin run --check <ping uuid> --server http://localhost:8000 -- ./backup.sh
 ```
+
+`tocsin run` sends a start ping, runs the command with its output passing through as usual, then
+reports the exit code with the last 100 lines of output. If tocsin can't be reached, the command
+still runs, a warning goes to stderr, and the command's own exit code is returned. A plain
+`curl <ping_url>/$?` after the job works too.
 
 ## What works today
 
@@ -161,8 +167,8 @@ alert is a row in Postgres first.
 | Phase | Contents | Status |
 |---|---|---|
 | 1. Core | Checks, pings, overdue sweep, exactly-once Telegram alerts, API keys, rate limiting, metrics, CI, Docker Compose | Done |
-| 2. Usable | Start/finish runs and durations | Done |
-| | CLI wrapper, flapping rules, self-monitoring | Next |
+| 2. Usable | Start/finish runs and durations, CLI wrapper | Done |
+| | Flapping rules, self-monitoring | Next |
 | 3. Dashboard | Overview, check page, alert log, live updates | Planned |
 | 4. Eval checks | Result schema, statistics, alert rules, JUnit and Stochast adapters | Planned |
 | 5. Summaries | Redaction, LLM summaries (Claude, OpenAI and others), evaluation of the summariser | Planned |

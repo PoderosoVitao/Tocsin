@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
 from collections.abc import Callable, Sequence
 from typing import Any
@@ -98,12 +99,27 @@ def _api(args: argparse.Namespace) -> int:
 # extra arguments (such as --workers 2) are passed through to taskiq.
 def _taskiq(command: str, target: str) -> Handler:
     def run(args: argparse.Namespace) -> int:
-        import os
-
         argv = [sys.executable, "-m", "taskiq", command, target, *args.taskiq_args]
         os.execv(sys.executable, argv)
 
     return run
+
+
+def _run(args: argparse.Namespace) -> int:
+    from tocsin.wrapper import run
+
+    command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    if not command:
+        print("tocsin run: give the command to run after --", file=sys.stderr)
+        return 2
+    if not args.check:
+        print("tocsin run: --check (or TOCSIN_CHECK) is required", file=sys.stderr)
+        return 2
+    if args.check.startswith(("http://", "https://")):
+        ping_url = args.check
+    else:
+        ping_url = f"{args.server.rstrip('/')}/ping/{args.check}"
+    return run(command, ping_url, tail_lines=args.tail_lines, timeout=args.timeout)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -143,6 +159,30 @@ def build_parser() -> argparse.ArgumentParser:
     scheduler = commands.add_parser("scheduler", help="run the scheduler for periodic tasks")
     scheduler.add_argument("taskiq_args", nargs=argparse.REMAINDER)
     scheduler.set_defaults(handler=_taskiq("scheduler", "tocsin.worker:scheduler"))
+
+    run = commands.add_parser(
+        "run",
+        help="run a command and report its start, exit code and output",
+        usage="tocsin run --check <uuid or ping URL> [options] -- command [args...]",
+    )
+    run.add_argument(
+        "--check",
+        default=os.environ.get("TOCSIN_CHECK"),
+        help="the check's ping uuid, or its full ping URL (default: $TOCSIN_CHECK)",
+    )
+    run.add_argument(
+        "--server",
+        default=os.environ.get("TOCSIN_URL", "http://localhost:8000"),
+        help="tocsin's address, used with a bare uuid (default: $TOCSIN_URL or localhost:8000)",
+    )
+    run.add_argument(
+        "--tail-lines", type=int, default=100, help="output lines to send (default: 100)"
+    )
+    run.add_argument(
+        "--timeout", type=float, default=10, help="seconds to wait for each ping (default: 10)"
+    )
+    run.add_argument("command", nargs=argparse.REMAINDER)
+    run.set_defaults(handler=_run)
     return parser
 
 
