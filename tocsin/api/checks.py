@@ -3,13 +3,13 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 from sqlalchemy import delete, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tocsin.api.deps import AppSettings, Session
-from tocsin.api.schemas import CheckIn, CheckOut, CheckPatch
-from tocsin.models import Channel, Check, State, check_channels
+from tocsin.api.schemas import CheckIn, CheckOut, CheckPatch, RunOut
+from tocsin.models import Channel, Check, Run, State, check_channels
 from tocsin.schedule import ScheduleError, validate
 from tocsin.transitions import clear_schedule, schedule_next, transition
 
@@ -69,6 +69,7 @@ async def create_check(body: CheckIn, session: Session, settings: AppSettings) -
         schedule=body.schedule,
         timezone=body.timezone,
         grace_seconds=body.grace_seconds,
+        max_duration_seconds=body.max_duration_seconds,
     )
     session.add(check)
     await session.flush()
@@ -114,7 +115,8 @@ async def update_check(
 
     for field, value in changes.items():
         setattr(check, field, value)
-    if changes.keys() & {"schedule", "timezone", "grace_seconds"} and check.state in (
+    deadline_fields = {"schedule", "timezone", "grace_seconds", "max_duration_seconds"}
+    if changes.keys() & deadline_fields and check.state in (
         State.UP,
         State.DOWN,
     ):
@@ -146,3 +148,20 @@ async def delete_check(check_id: uuid.UUID, session: Session) -> Response:
     await session.delete(check)
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# Run history, newest first. Pass the smallest id from one page as `before` to
+# get the next.
+@router.get("/{check_id}/runs")
+async def list_runs(
+    check_id: uuid.UUID,
+    session: Session,
+    limit: int = Query(default=50, ge=1, le=500),
+    before: int | None = None,
+) -> list[RunOut]:
+    await get_check(session, check_id)
+    query = select(Run).where(Run.check_id == check_id)
+    if before is not None:
+        query = query.where(Run.id < before)
+    runs = await session.scalars(query.order_by(Run.id.desc()).limit(limit))
+    return [RunOut.build(run) for run in runs]

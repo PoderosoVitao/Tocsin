@@ -7,11 +7,12 @@ from typing import Any, Self
 from pydantic import BaseModel, Field, model_validator
 
 from tocsin.channels import validate_config
-from tocsin.models import Channel, ChannelKind, Check, CheckKind, State
+from tocsin.models import Channel, ChannelKind, Check, CheckKind, Run, RunStatus, State
 from tocsin.schedule import ScheduleError, validate
 from tocsin.transitions import displayed_state
 
 MAX_GRACE_SECONDS = 7 * 24 * 3600
+MAX_DURATION_SECONDS = 7 * 24 * 3600
 
 
 class CheckIn(BaseModel):
@@ -20,6 +21,8 @@ class CheckIn(BaseModel):
     schedule: str = Field(min_length=1, max_length=200)
     timezone: str = "UTC"
     grace_seconds: int = Field(default=300, ge=0, le=MAX_GRACE_SECONDS)
+    # Alert when a run (start ping to finish ping) takes longer than this.
+    max_duration_seconds: int | None = Field(default=None, ge=1, le=MAX_DURATION_SECONDS)
     # The channels to alert. Left out, a new check alerts every channel, which
     # is what a single user with one Telegram chat wants.
     channel_ids: list[uuid.UUID] | None = None
@@ -38,6 +41,7 @@ class CheckPatch(BaseModel):
     schedule: str | None = Field(default=None, min_length=1, max_length=200)
     timezone: str | None = None
     grace_seconds: int | None = Field(default=None, ge=0, le=MAX_GRACE_SECONDS)
+    max_duration_seconds: int | None = Field(default=None, ge=1, le=MAX_DURATION_SECONDS)
     channel_ids: list[uuid.UUID] | None = None
     paused: bool | None = None
 
@@ -49,10 +53,12 @@ class CheckOut(BaseModel):
     schedule: str
     timezone: str
     grace_seconds: int
+    max_duration_seconds: int | None
     state: State
     due_at: datetime | None
     next_expected_at: datetime | None
     last_ping_at: datetime | None
+    running_since: datetime | None
     ping_url: str
     channel_ids: list[uuid.UUID]
     created_at: datetime
@@ -68,10 +74,12 @@ class CheckOut(BaseModel):
             schedule=check.schedule,
             timezone=check.timezone,
             grace_seconds=check.grace_seconds,
+            max_duration_seconds=check.max_duration_seconds,
             state=displayed_state(check, now),
             due_at=check.due_at,
             next_expected_at=check.next_expected_at,
             last_ping_at=check.last_ping_at,
+            running_since=check.last_start_at,
             ping_url=f"{public_url.rstrip('/')}/ping/{check.ping_key}",
             channel_ids=channel_ids,
             created_at=check.created_at,
@@ -123,4 +131,26 @@ class ChannelOut(BaseModel):
             name=channel.name,
             config=mask_config(channel.config),
             created_at=channel.created_at,
+        )
+
+
+class RunOut(BaseModel):
+    id: int
+    status: RunStatus
+    started_at: datetime | None
+    finished_at: datetime | None
+    duration_ms: int | None
+    exit_code: int | None
+    output_tail: str | None
+
+    @classmethod
+    def build(cls, run: Run) -> RunOut:
+        return cls(
+            id=run.id,
+            status=RunStatus(run.status),
+            started_at=run.started_at,
+            finished_at=run.finished_at,
+            duration_ms=run.duration_ms,
+            exit_code=run.exit_code,
+            output_tail=run.output_tail,
         )

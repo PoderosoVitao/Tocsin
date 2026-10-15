@@ -38,10 +38,14 @@ async def transition(
 
 
 # Sets when the next ping is due, counted from `after`, and the deadline the
-# sweep uses (due time plus grace).
+# sweep uses: the due time plus grace, or, while a run is open on a check with
+# a maximum duration, the moment that run becomes too long if that is sooner.
 def schedule_next(check: Check, after: datetime) -> None:
     check.due_at = next_due(check.schedule, check.timezone, after)
     check.next_expected_at = check.due_at + timedelta(seconds=check.grace_seconds)
+    if check.last_start_at is not None and check.max_duration_seconds is not None:
+        too_long_at = check.last_start_at + timedelta(seconds=check.max_duration_seconds)
+        check.next_expected_at = min(check.next_expected_at, too_long_at)
 
 
 def clear_schedule(check: Check) -> None:

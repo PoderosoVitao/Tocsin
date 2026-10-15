@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from zoneinfo import ZoneInfo
+from datetime import UTC, datetime, timedelta
 
 from redis.asyncio import Redis
 from redis.asyncio.lock import Lock
@@ -11,21 +10,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tocsin.alerts import Dispatcher, dispatch_pending
 from tocsin.db import Sessionmaker
+from tocsin.humanize import duration, local_time
 from tocsin.metrics import record_sweep
 from tocsin.models import Check, Event, State
 from tocsin.transitions import transition
 
 
-def _local(moment: datetime | None, timezone: str) -> str:
-    if moment is None:
-        return "never"
-    return moment.astimezone(ZoneInfo(timezone)).strftime("%Y-%m-%d %H:%M %Z")
-
-
-def overdue_reason(check: Check) -> str:
+# Says why a check is overdue: a run that started and is taking too long, a
+# run that started and never reported finishing, or no ping at all.
+def overdue_reason(check: Check, now: datetime) -> str:
+    if check.last_start_at is not None:
+        started = local_time(check.last_start_at, check.timezone)
+        limit = check.max_duration_seconds
+        running = now - check.last_start_at
+        if limit is not None and running >= timedelta(seconds=limit):
+            return (
+                f"running for {duration(running)}, longer than the {duration(limit)} maximum "
+                f"(started {started})"
+            )
+        return f"started {started} and never finished"
     return (
-        f"no ping since {_local(check.last_ping_at, check.timezone)}; "
-        f"it was due at {_local(check.due_at, check.timezone)}"
+        f"no ping since {local_time(check.last_ping_at, check.timezone)}; "
+        f"it was due at {local_time(check.due_at, check.timezone)}"
     )
 
 
@@ -50,7 +56,7 @@ async def sweep(session: AsyncSession, now: datetime, limit: int = 100) -> list[
         .with_for_update(skip_locked=True)
     )
     return [
-        await transition(session, check, State.DOWN, overdue_reason(check), now)
+        await transition(session, check, State.DOWN, overdue_reason(check, now), now)
         for check in overdue
     ]
 

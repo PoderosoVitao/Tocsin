@@ -109,13 +109,16 @@ def test_output_tail_survives_nul_bytes_and_split_characters() -> None:
     assert output_tail("é".encode() * 3, 5) == "�éé"
 
 
-async def test_start_ping_is_recorded_without_changing_state(
+# A start is the job's first sign of life, so a new check comes up: otherwise
+# a job whose first run hung would never be noticed.
+async def test_start_ping_brings_a_new_check_up(
     client: httpx.AsyncClient, sessionmaker: Sessionmaker
 ) -> None:
     check = await create_check(client)
     await client.get(f"{check['ping_path']}/start")
     read = (await client.get(f"/api/checks/{check['id']}")).json()
-    assert read["state"] == "new"
+    assert read["state"] == "up"
+    assert read["running_since"] is not None
     async with sessionmaker() as session:
         [ping] = await session.scalars(select(Ping))
     assert ping.kind == "start"

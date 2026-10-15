@@ -75,6 +75,10 @@ curl -s -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
 
 - **Missed runs.** A sweep every five seconds moves checks whose deadline (due time plus grace)
   has passed to `down`.
+- **Runs and durations.** A `start` ping followed by a finish ping makes a run with a duration.
+  Set `max_duration_seconds` on a check to be alerted when a run takes longer, whether it is still
+  going or has just finished. A job that starts and never finishes is reported when its next run
+  was due. Run history is at `/api/checks/<id>/runs`.
 - **Telegram alerts** when a check goes down and when it recovers, with the last lines of the
   job's output when it sent some. Failed sends are retried with exponential backoff and jitter for about 40 minutes,
   then marked failed.
@@ -144,8 +148,8 @@ alert is a row in Postgres first.
 - **Nobody watches the watcher yet.** If tocsin itself is down, nothing alerts you. Pinging an
   external monitor on a schedule is planned for the next phase.
 - **Telegram is the only channel** so far. Email and outgoing webhooks are planned.
-- **Start pings are recorded but not yet paired** with finish pings, so there are no durations
-  and no "started but never finished" alerts yet.
+- **One run at a time per check.** A second `start` before a finish marks the first run
+  unfinished; overlapping runs of the same job aren't tracked separately.
 - **Lenient in the repeated hour.** On the night the clocks go back, a frequent job may be
   detected as missing up to an hour late. This is the price of never raising a false alarm on
   that night.
@@ -157,7 +161,8 @@ alert is a row in Postgres first.
 | Phase | Contents | Status |
 |---|---|---|
 | 1. Core | Checks, pings, overdue sweep, exactly-once Telegram alerts, API keys, rate limiting, metrics, CI, Docker Compose | Done |
-| 2. Usable | Start/finish runs and durations, CLI wrapper, flapping rules, self-monitoring | Next |
+| 2. Usable | Start/finish runs and durations | Done |
+| | CLI wrapper, flapping rules, self-monitoring | Next |
 | 3. Dashboard | Overview, check page, alert log, live updates | Planned |
 | 4. Eval checks | Result schema, statistics, alert rules, JUnit and Stochast adapters | Planned |
 | 5. Summaries | Redaction, LLM summaries (Claude, OpenAI and others), evaluation of the summariser | Planned |

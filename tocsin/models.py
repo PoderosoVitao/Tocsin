@@ -68,6 +68,8 @@ class RunStatus(StrEnum):
     RUNNING = "running"
     SUCCESS = "success"
     FAIL = "fail"
+    # Started, then another start arrived before any finish ping.
+    UNFINISHED = "unfinished"
 
 
 class DeliveryStatus(StrEnum):
@@ -101,12 +103,16 @@ class Check(Base):
     schedule: Mapped[str] = mapped_column(String(200))
     timezone: Mapped[str] = mapped_column(String(64), default="UTC")
     grace_seconds: Mapped[int] = mapped_column(default=300)
+    # The longest a run may take, from its start ping to its finish ping.
+    max_duration_seconds: Mapped[int | None]
     state: Mapped[str] = mapped_column(String(16), default=State.NEW)
     # When the next ping is due according to the schedule, and that time plus
     # the grace period. The sweep only looks at the second one.
     due_at: Mapped[datetime | None]
     next_expected_at: Mapped[datetime | None] = mapped_column(index=True)
     last_ping_at: Mapped[datetime | None]
+    # When the run in progress started; None when no run is open.
+    last_start_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
