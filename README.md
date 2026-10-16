@@ -88,6 +88,11 @@ still runs, a warning goes to stderr, and the command's own exit code is returne
 - **Telegram alerts** when a check goes down and when it recovers, with the last lines of the
   job's output when it sent some. Failed sends are retried with exponential backoff and jitter for about 40 minutes,
   then marked failed.
+- **Flapping control.** After an alert, further changes within the check's cooldown (five minutes
+  by default) are recorded but not sent. When the cooldown ends, one alert says where the check
+  settled, if that differs from the last message, with how many times it changed. An alert can be
+  delayed by the cooldown but never dropped. Optional reminders (`reminder_seconds`) repeat the
+  alert while a check stays down.
 - **States** `new`, `up`, `late` (past due, inside the grace period), `down` and `paused`, with
   every change recorded as an event.
 - **A JSON API** for checks and channels, protected by API keys. Channel tokens are never returned.
@@ -134,6 +139,10 @@ gets 110 events.
 One duplicate remains possible, by design: if a worker crashes after Telegram accepted a message
 but before the commit, the message is sent again. A duplicate alert is better than a lost one.
 
+The sweep's other two passes, the alert sent when a flapping check settles and the "still down"
+reminder, claim their rows the same way and update them so they no longer match, so they are sent
+once each too.
+
 The Redis lock around each sweep is only an optimisation, so extra sweeps return early instead
 of competing for rows. Correctness never depends on it, because a Redis lock can expire in the
 middle of a slow sweep.
@@ -167,8 +176,8 @@ alert is a row in Postgres first.
 | Phase | Contents | Status |
 |---|---|---|
 | 1. Core | Checks, pings, overdue sweep, exactly-once Telegram alerts, API keys, rate limiting, metrics, CI, Docker Compose | Done |
-| 2. Usable | Start/finish runs and durations, CLI wrapper | Done |
-| | Flapping rules, self-monitoring | Next |
+| 2. Usable | Start/finish runs and durations, CLI wrapper, flapping rules | Done |
+| | Self-monitoring | Next |
 | 3. Dashboard | Overview, check page, alert log, live updates | Planned |
 | 4. Eval checks | Result schema, statistics, alert rules, JUnit and Stochast adapters | Planned |
 | 5. Summaries | Redaction, LLM summaries (Claude, OpenAI and others), evaluation of the summariser | Planned |

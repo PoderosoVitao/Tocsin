@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from typing import Any
 
 import httpx
 
 from tocsin.channels import Alert
 from tocsin.db import Sessionmaker
-from tocsin.models import Channel
+from tocsin.models import Channel, Check, Event
+from tocsin.pings import Signal, record_ping
+from tocsin.sweep import sweep
 
 
 async def add_channel(sessionmaker: Sessionmaker, name: str = "phone") -> str:
@@ -45,3 +48,18 @@ class FakeSender:
             raise outcome
         self.sent.append(alert)
         return outcome
+
+
+# Sends a ping as if it arrived at `at`, going through the same code as the
+# HTTP endpoint, so tests can play out hours of pings in an instant.
+async def ping_at(
+    sessionmaker: Sessionmaker, check_id: str, signal: str | None, at: datetime, body: bytes = b""
+) -> None:
+    async with sessionmaker() as session, session.begin():
+        check = await session.get_one(Check, check_id)
+        await record_ping(session, check.ping_key, Signal.parse(signal), body, None, at, 10_000)
+
+
+async def sweep_at(sessionmaker: Sessionmaker, at: datetime) -> list[Event]:
+    async with sessionmaker() as session, session.begin():
+        return await sweep(session, at)

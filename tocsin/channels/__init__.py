@@ -41,7 +41,8 @@ class Alert:
     @property
     def headline(self) -> str:
         if self.to_state == State.DOWN:
-            return f"{self.check_name} is down"
+            still = "still " if self.from_state == State.DOWN else ""
+            return f"{self.check_name} is {still}down"
         if self.to_state == State.UP:
             return f"{self.check_name} is up again"
         return f"{self.check_name} is {self.to_state}"

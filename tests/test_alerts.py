@@ -72,7 +72,7 @@ async def test_only_failures_and_recoveries_alert(
     client: httpx.AsyncClient, sessionmaker: Sessionmaker, dispatcher: RecordingDispatcher
 ) -> None:
     await add_channel(sessionmaker)
-    check = await create_check(client)
+    check = await create_check(client, cooldown_seconds=0)
     await client.get(check["ping_path"])  # new -> up: no alert
     await client.patch(f"/api/checks/{check['id']}", json={"paused": True})
     await client.patch(f"/api/checks/{check['id']}", json={"paused": False})

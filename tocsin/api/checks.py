@@ -70,6 +70,8 @@ async def create_check(body: CheckIn, session: Session, settings: AppSettings) -
         timezone=body.timezone,
         grace_seconds=body.grace_seconds,
         max_duration_seconds=body.max_duration_seconds,
+        cooldown_seconds=body.cooldown_seconds,
+        reminder_seconds=body.reminder_seconds,
     )
     session.add(check)
     await session.flush()
@@ -125,6 +127,9 @@ async def update_check(
     if body.paused is True and check.state != State.PAUSED:
         await transition(session, check, State.PAUSED, "paused", now)
         clear_schedule(check)
+        # Whoever paused it knows its state; resuming starts afresh rather
+        # than sending a catch-up alert for whatever happened before.
+        check.last_alerted_state = None
     elif body.paused is False and check.state == State.PAUSED:
         # A check that has reported before resumes as up and is expected again
         # from now; one that never reported waits for its first ping.

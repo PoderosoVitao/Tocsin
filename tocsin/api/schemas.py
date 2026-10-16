@@ -13,6 +13,8 @@ from tocsin.transitions import displayed_state
 
 MAX_GRACE_SECONDS = 7 * 24 * 3600
 MAX_DURATION_SECONDS = 7 * 24 * 3600
+MAX_COOLDOWN_SECONDS = 24 * 3600
+MAX_REMINDER_SECONDS = 7 * 24 * 3600
 
 
 class CheckIn(BaseModel):
@@ -23,6 +25,11 @@ class CheckIn(BaseModel):
     grace_seconds: int = Field(default=300, ge=0, le=MAX_GRACE_SECONDS)
     # Alert when a run (start ping to finish ping) takes longer than this.
     max_duration_seconds: int | None = Field(default=None, ge=1, le=MAX_DURATION_SECONDS)
+    # Changes within this long of the last alert are held back; one alert
+    # reports where the check settled once it is over.
+    cooldown_seconds: int = Field(default=300, ge=0, le=MAX_COOLDOWN_SECONDS)
+    # Repeat the alert this often while the check stays down. Off when left out.
+    reminder_seconds: int | None = Field(default=None, ge=60, le=MAX_REMINDER_SECONDS)
     # The channels to alert. Left out, a new check alerts every channel, which
     # is what a single user with one Telegram chat wants.
     channel_ids: list[uuid.UUID] | None = None
@@ -42,6 +49,8 @@ class CheckPatch(BaseModel):
     timezone: str | None = None
     grace_seconds: int | None = Field(default=None, ge=0, le=MAX_GRACE_SECONDS)
     max_duration_seconds: int | None = Field(default=None, ge=1, le=MAX_DURATION_SECONDS)
+    cooldown_seconds: int | None = Field(default=None, ge=0, le=MAX_COOLDOWN_SECONDS)
+    reminder_seconds: int | None = Field(default=None, ge=60, le=MAX_REMINDER_SECONDS)
     channel_ids: list[uuid.UUID] | None = None
     paused: bool | None = None
 
@@ -54,6 +63,8 @@ class CheckOut(BaseModel):
     timezone: str
     grace_seconds: int
     max_duration_seconds: int | None
+    cooldown_seconds: int
+    reminder_seconds: int | None
     state: State
     due_at: datetime | None
     next_expected_at: datetime | None
@@ -75,6 +86,8 @@ class CheckOut(BaseModel):
             timezone=check.timezone,
             grace_seconds=check.grace_seconds,
             max_duration_seconds=check.max_duration_seconds,
+            cooldown_seconds=check.cooldown_seconds,
+            reminder_seconds=check.reminder_seconds,
             state=displayed_state(check, now),
             due_at=check.due_at,
             next_expected_at=check.next_expected_at,

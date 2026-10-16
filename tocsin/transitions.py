@@ -13,6 +13,10 @@ from tocsin.schedule import next_due
 # caller's transaction, along with a pending delivery per channel when the
 # change is one that alerts. Every state change goes through here, so the
 # event log is a complete history and no caller can forget the alert.
+#
+# Inside the check's cooldown an alerting change is recorded as suppressed
+# instead of sent; the sweep sends one alert for where the check settled once
+# the cooldown is over (see sweep_settled).
 async def transition(
     session: AsyncSession,
     check: Check,
@@ -33,8 +37,25 @@ async def transition(
     session.add(event)
     await session.flush()
     if should_alert(event.from_state, event.to_state):
-        await create_deliveries(session, event, now)
+        if in_cooldown(check, now):
+            event.suppressed = True
+        else:
+            await alert(session, check, event, now)
     return event
+
+
+def in_cooldown(check: Check, now: datetime) -> bool:
+    if check.last_alert_at is None:
+        return False
+    return now - check.last_alert_at < timedelta(seconds=check.cooldown_seconds)
+
+
+# Sends an event to the check's channels and remembers what the check was
+# last reported as, which the cooldown and reminders are measured from.
+async def alert(session: AsyncSession, check: Check, event: Event, now: datetime) -> None:
+    await create_deliveries(session, event, now)
+    check.last_alert_at = now
+    check.last_alerted_state = event.to_state
 
 
 # Sets when the next ping is due, counted from `after`, and the deadline the

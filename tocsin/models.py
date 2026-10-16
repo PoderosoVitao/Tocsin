@@ -17,6 +17,7 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    false,
     func,
     text,
 )
@@ -105,6 +106,12 @@ class Check(Base):
     grace_seconds: Mapped[int] = mapped_column(default=300)
     # The longest a run may take, from its start ping to its finish ping.
     max_duration_seconds: Mapped[int | None]
+    # After an alert, further state changes for this long are recorded but not
+    # sent, so a check flapping between up and down doesn't send a message
+    # each time. When the cooldown ends, one alert reports where it settled.
+    cooldown_seconds: Mapped[int] = mapped_column(default=300, server_default=text("300"))
+    # Repeat the alert this often while the check stays down; None for never.
+    reminder_seconds: Mapped[int | None]
     state: Mapped[str] = mapped_column(String(16), default=State.NEW)
     # When the next ping is due according to the schedule, and that time plus
     # the grace period. The sweep only looks at the second one.
@@ -113,6 +120,9 @@ class Check(Base):
     last_ping_at: Mapped[datetime | None]
     # When the run in progress started; None when no run is open.
     last_start_at: Mapped[datetime | None]
+    # When an alert was last sent for this check, and the state it reported.
+    last_alert_at: Mapped[datetime | None]
+    last_alerted_state: Mapped[str | None] = mapped_column(String(16))
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
@@ -157,6 +167,9 @@ class Event(Base):
     from_state: Mapped[str] = mapped_column(String(16))
     to_state: Mapped[str] = mapped_column(String(16))
     reason: Mapped[str] = mapped_column(Text)
+    # True when this change would have alerted but came inside the check's
+    # cooldown, so it was recorded and not sent.
+    suppressed: Mapped[bool] = mapped_column(default=False, server_default=false())
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 
