@@ -55,12 +55,7 @@ async def refresh_state_gauges(session: AsyncSession, redis: Redis, now: datetim
     ):
         DELIVERIES.labels(status=status).set(count)
 
-    unswept = await session.scalar(
-        select(func.count())
-        .select_from(Check)
-        .where(Check.state == State.UP, Check.next_expected_at < now - SWEEP_LAG_TOLERANCE)
-    )
-    UNSWEPT.set(unswept or 0)
+    UNSWEPT.set(await count_unswept(session, now))
 
     try:
         last_sweep = await redis.get(LAST_SWEEP_KEY)
@@ -68,6 +63,17 @@ async def refresh_state_gauges(session: AsyncSession, redis: Redis, now: datetim
         last_sweep = None
     if last_sweep is not None:
         LAST_SWEEP.set(float(last_sweep))
+
+
+# Checks past their deadline for over a minute that are still up. The sweep
+# runs every few seconds, so anything here means it has stopped.
+async def count_unswept(session: AsyncSession, now: datetime) -> int:
+    unswept = await session.scalar(
+        select(func.count())
+        .select_from(Check)
+        .where(Check.state == State.UP, Check.next_expected_at < now - SWEEP_LAG_TOLERANCE)
+    )
+    return unswept or 0
 
 
 async def record_sweep(redis: Redis | None) -> None:

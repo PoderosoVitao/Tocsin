@@ -6,8 +6,7 @@ jobs, when the numbers got worse.
 > **Status: work in progress.** The core works and is tested: tocsin notices when a job misses
 > its schedule, fails or runs too long, and sends exactly one Telegram alert for it. The dashboard,
 > evaluation checks and failure summaries are still to come (see the
-> [roadmap](#roadmap)). Tocsin doesn't monitor itself yet, so don't make it the only thing
-> watching something important.
+> [roadmap](#roadmap)).
 
 ## Why another job monitor
 
@@ -158,10 +157,33 @@ worker died) to another worker. Its scheduler also accepts intervals of seconds,
 five-second sweep needs. The queue is never trusted for correctness, though: every
 alert is a row in Postgres first.
 
+## Who watches the watcher
+
+A monitor that has stopped looks exactly like a quiet night, so tocsin reports on itself to a
+monitor outside it. Create a check on another service (healthchecks.io's free tier is enough, or
+a second tocsin) with a one-minute period, and set its ping URL as `TOCSIN_SELF_PING_URL`. Give
+that service a different way to reach you than tocsin's Telegram bot, such as email.
+
+Every minute the scheduler queues a heartbeat and a worker runs it. If everything is fine, it
+pings the URL; if not, it pings `<url>/fail` with a list of what is wrong, so you are alerted at
+once with the reason instead of waiting for heartbeats to stop.
+
+**Covered:** the scheduler, Redis and at least one worker (the heartbeat can't run without all
+three); the database; the sweep (one has finished in the last two minutes, and no overdue check
+is left up); alert delivery (any alert that failed to send in the last 15 minutes, and any left
+with nothing retrying it); and the API's health endpoint, when `TOCSIN_SELF_CHECK_API_URL` is set
+(Docker Compose sets it).
+
+**Not covered:**
+
+- The external monitor itself. If it is down or its alerts don't reach you, nothing tells you.
+- Whether your jobs can reach tocsin. The API is checked from inside, not through the public
+  address. A job that can't reach tocsin does show up, as a missed run, but only at its deadline.
+- The server's clock. If it drifts, deadlines drift with it.
+- Outages shorter than the external check's grace period, and anything between two heartbeats.
+
 ## Limitations
 
-- **Nobody watches the watcher yet.** If tocsin itself is down, nothing alerts you. Pinging an
-  external monitor on a schedule is planned for the next phase.
 - **Telegram is the only channel** so far. Email and outgoing webhooks are planned.
 - **One run at a time per check.** A second `start` before a finish marks the first run
   unfinished; overlapping runs of the same job aren't tracked separately.
@@ -176,9 +198,8 @@ alert is a row in Postgres first.
 | Phase | Contents | Status |
 |---|---|---|
 | 1. Core | Checks, pings, overdue sweep, exactly-once Telegram alerts, API keys, rate limiting, metrics, CI, Docker Compose | Done |
-| 2. Usable | Start/finish runs and durations, CLI wrapper, flapping rules | Done |
-| | Self-monitoring | Next |
-| 3. Dashboard | Overview, check page, alert log, live updates | Planned |
+| 2. Usable | Start/finish runs and durations, CLI wrapper, flapping rules, self-monitoring | Done |
+| 3. Dashboard | Overview, check page, alert log, live updates | Next |
 | 4. Eval checks | Result schema, statistics, alert rules, JUnit and Stochast adapters | Planned |
 | 5. Summaries | Redaction, LLM summaries (Claude, OpenAI and others), evaluation of the summariser | Planned |
 

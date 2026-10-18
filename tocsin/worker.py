@@ -19,6 +19,7 @@ from tocsin.channels import Sender
 from tocsin.channels.telegram import TelegramSender
 from tocsin.config import Settings, get_settings
 from tocsin.db import Sessionmaker, create_engine, create_sessionmaker
+from tocsin.heartbeat import HEARTBEAT_INTERVAL_SECONDS, heartbeat
 from tocsin.sweep import run_sweep
 
 log = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ RELAY_DELIVERIES = "tocsin.relay_deliveries"
 RELAY_INTERVAL_SECONDS = 5
 SWEEP = "tocsin.sweep"
 SWEEP_INTERVAL_SECONDS = 5
+HEARTBEAT = "tocsin.heartbeat"
 
 
 def build_senders(http: httpx.AsyncClient, settings: Settings) -> dict[str, Sender]:
@@ -117,6 +119,17 @@ def register_tasks(broker: AsyncBroker, settings: Settings) -> None:
         resources: Resources = context.state.resources
         return await run_sweep(
             resources.sessionmaker, TaskiqDispatcher(context.broker), resources.redis
+        )
+
+    @broker.task(task_name=HEARTBEAT, schedule=[{"interval": HEARTBEAT_INTERVAL_SECONDS}])
+    async def send_heartbeat(context: Context = TaskiqDepends()) -> list[str] | None:
+        resources: Resources = context.state.resources
+        return await heartbeat(
+            resources.sessionmaker,
+            resources.redis,
+            resources.http,
+            resources.settings,
+            datetime.now(UTC),
         )
 
 

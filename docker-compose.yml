@@ -12,6 +12,9 @@ x-tocsin: &tocsin
     TOCSIN_PUBLIC_URL: ${TOCSIN_PUBLIC_URL:-http://localhost:8000}
     TOCSIN_DASHBOARD_URL: ${TOCSIN_DASHBOARD_URL:-}
     TOCSIN_TELEGRAM_API_URL: ${TOCSIN_TELEGRAM_API_URL:-https://api.telegram.org}
+    # A check on another monitor that tocsin pings every minute while healthy.
+    TOCSIN_SELF_PING_URL: ${TOCSIN_SELF_PING_URL:-}
+    TOCSIN_SELF_CHECK_API_URL: http://api:8000
 
 services:
   postgres:

@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     delivery_backoff_cap_seconds: float = 1800
     telegram_api_url: str = "https://api.telegram.org"
 
+    # Self-monitoring. Every minute a worker pings this URL (a check on another
+    # monitor, such as healthchecks.io or a second tocsin) while tocsin is
+    # healthy, and its /fail endpoint, with the problems, while it isn't.
+    self_ping_url: str | None = None
+    # The API's address as the worker sees it (http://api:8000 in Docker
+    # Compose), so the heartbeat can confirm the ping endpoints are up.
+    self_check_api_url: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:
