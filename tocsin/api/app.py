@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, FastAPI
 from redis.asyncio import Redis
 
 from tocsin.alerts import Dispatcher
-from tocsin.api import channels, checks, health, ping
+from tocsin.api import channels, checks, health, ping, stream
 from tocsin.api.deps import require_api_key
 from tocsin.channels import Sender
 from tocsin.config import Settings, get_settings
@@ -77,6 +77,7 @@ def create_app(
     api = APIRouter(prefix="/api", dependencies=[Depends(require_api_key)])
     api.include_router(checks.router)
     api.include_router(channels.router)
+    api.include_router(stream.router)
     app.include_router(api)
     app.include_router(ping.router)
     app.include_router(health.router)

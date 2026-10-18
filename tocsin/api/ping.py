@@ -8,6 +8,7 @@ from fastapi.responses import PlainTextResponse
 
 from tocsin.alerts import dispatch_pending
 from tocsin.api.deps import AppSettings, Session
+from tocsin.events import check_updated, publish
 from tocsin.metrics import PING_SECONDS, PINGS, PINGS_REJECTED
 from tocsin.pings import Signal, record_ping
 from tocsin.ratelimit import allow
@@ -71,6 +72,7 @@ async def _record(
     await session.commit()
     PINGS.labels(kind=parsed.kind).inc()
     await dispatch_pending(session, request.app.state.dispatcher)
+    await publish(request.app.state.redis, check_updated(outcome.check))
     return PlainTextResponse("OK")
 
 

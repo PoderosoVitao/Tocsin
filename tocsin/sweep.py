@@ -12,6 +12,7 @@ from sqlalchemy.orm import QueryableAttribute
 
 from tocsin.alerts import Dispatcher, dispatch_pending
 from tocsin.db import Sessionmaker
+from tocsin.events import publish
 from tocsin.humanize import duration, local_time
 from tocsin.metrics import record_sweep
 from tocsin.models import Check, Event, State
@@ -205,6 +206,12 @@ async def run_sweep(
                 async with session.begin():
                     events = await sweep(session, datetime.now(UTC), batch)
                 await dispatch_pending(session, dispatcher)
+            for check_id in dict.fromkeys(e.check_id for e in events):
+                latest = [e for e in events if e.check_id == check_id][-1]
+                await publish(
+                    redis,
+                    {"type": "check.updated", "check_id": str(check_id), "state": latest.to_state},
+                )
             total += len(events)
             if len(events) < batch:
                 break

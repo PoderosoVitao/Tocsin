@@ -3,12 +3,13 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from sqlalchemy import delete, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tocsin.api.deps import AppSettings, Session
 from tocsin.api.schemas import CheckIn, CheckOut, CheckPatch, RunOut
+from tocsin.events import check_deleted, check_updated, publish
 from tocsin.models import Channel, Check, Run, State, check_channels
 from tocsin.schedule import ScheduleError, validate
 from tocsin.transitions import clear_schedule, schedule_next, transition
@@ -62,7 +63,9 @@ async def _assign_channels(
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def create_check(body: CheckIn, session: Session, settings: AppSettings) -> CheckOut:
+async def create_check(
+    body: CheckIn, request: Request, session: Session, settings: AppSettings
+) -> CheckOut:
     check = Check(
         name=body.name,
         kind=body.kind,
@@ -77,6 +80,7 @@ async def create_check(body: CheckIn, session: Session, settings: AppSettings) -
     await session.flush()
     channel_ids = await _assign_channels(session, check.id, body.channel_ids)
     await session.commit()
+    await publish(request.app.state.redis, check_updated(check))
     return CheckOut.build(check, channel_ids, settings.public_url, datetime.now(UTC))
 
 
@@ -100,7 +104,7 @@ async def read_check(check_id: uuid.UUID, session: Session, settings: AppSetting
 # write.
 @router.patch("/{check_id}")
 async def update_check(
-    check_id: uuid.UUID, body: CheckPatch, session: Session, settings: AppSettings
+    check_id: uuid.UUID, body: CheckPatch, request: Request, session: Session, settings: AppSettings
 ) -> CheckOut:
     now = datetime.now(UTC)
     check = await get_check(session, check_id, lock=True)
@@ -144,14 +148,16 @@ async def update_check(
     else:
         channel_ids = (await channel_ids_by_check(session, [check.id]))[check.id]
     await session.commit()
+    await publish(request.app.state.redis, check_updated(check))
     return CheckOut.build(check, channel_ids, settings.public_url, now)
 
 
 @router.delete("/{check_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_check(check_id: uuid.UUID, session: Session) -> Response:
+async def delete_check(check_id: uuid.UUID, request: Request, session: Session) -> Response:
     check = await get_check(session, check_id)
     await session.delete(check)
     await session.commit()
+    await publish(request.app.state.redis, check_deleted(check_id))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

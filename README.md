@@ -95,6 +95,11 @@ still runs, a warning goes to stderr, and the command's own exit code is returne
 - **States** `new`, `up`, `late` (past due, inside the grace period), `down` and `paused`, with
   every change recorded as an event.
 - **A JSON API** for checks and channels, protected by API keys. Channel tokens are never returned.
+- **Live updates.** `GET /api/stream` is a Server-Sent Events stream of check changes
+  (`check.updated`, `check.deleted`), fed by Redis pub/sub and published after each change is
+  committed. The messages are hints to refresh, not data, and a lost one never fails a ping or a
+  sweep. The stream needs an API key, so read it with `curl -N -H "Authorization: Bearer $KEY"`
+  or `fetch`; the browser's `EventSource` can't send headers.
 - **Rate limiting** per check in Redis (60 pings a minute by default). If Redis is down, pings are
   still accepted.
 - **Operations:** `/healthz`, and Prometheus metrics on `/metrics`, including
