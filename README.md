@@ -106,7 +106,10 @@ still runs, a warning goes to stderr, and the command's own exit code is returne
   committed. The messages are hints to refresh, not data, and a lost one never fails a ping or a
   sweep. The stream needs an API key, so read it with `curl -N -H "Authorization: Bearer $KEY"`
   or `fetch`; the browser's `EventSource` can't send headers, which is why the dashboard uses
-  `fetch`. `GET /api/overview` returns every check with its last 20 runs in one request.
+  `fetch`. `GET /api/overview` returns every check with its last 20 runs in one request, and
+  `GET /api/checks/<id>/events` lists a check's state changes, newest first, each with the alert
+  deliveries it caused: the channel, how many attempts, the last error and the next retry. Changes
+  held back by the cooldown are marked `suppressed`.
 - **Rate limiting** per check in Redis (60 pings a minute by default). If Redis is down, pings are
   still accepted.
 - **Operations:** `/healthz`, and Prometheus metrics on `/metrics`, including

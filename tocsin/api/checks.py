@@ -8,9 +8,9 @@ from sqlalchemy import delete, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tocsin.api.deps import AppSettings, Session
-from tocsin.api.schemas import CheckIn, CheckOut, CheckPatch, RunOut
+from tocsin.api.schemas import CheckIn, CheckOut, CheckPatch, DeliveryOut, EventOut, RunOut
 from tocsin.events import check_deleted, check_updated, publish
-from tocsin.models import Channel, Check, Run, State, check_channels
+from tocsin.models import Channel, Check, Delivery, Event, Run, State, check_channels
 from tocsin.schedule import ScheduleError, validate
 from tocsin.transitions import clear_schedule, schedule_next, transition
 
@@ -176,3 +176,31 @@ async def list_runs(
         query = query.where(Run.id < before)
     runs = await session.scalars(query.order_by(Run.id.desc()).limit(limit))
     return [RunOut.build(run) for run in runs]
+
+
+# State changes, newest first, each with the alert deliveries it caused: to
+# which channel, how many attempts, and the last error or the next retry.
+# Page with `before`, as for runs.
+@router.get("/{check_id}/events")
+async def list_events(
+    check_id: uuid.UUID,
+    session: Session,
+    limit: int = Query(default=50, ge=1, le=500),
+    before: int | None = None,
+) -> list[EventOut]:
+    await get_check(session, check_id)
+    query = select(Event).where(Event.check_id == check_id)
+    if before is not None:
+        query = query.where(Event.id < before)
+    events = list(await session.scalars(query.order_by(Event.id.desc()).limit(limit)))
+
+    rows = await session.execute(
+        select(Delivery, Channel.name)
+        .join(Channel, Channel.id == Delivery.channel_id)
+        .where(Delivery.event_id.in_([event.id for event in events]))
+        .order_by(Delivery.id)
+    )
+    deliveries: dict[int, list[DeliveryOut]] = {event.id: [] for event in events}
+    for delivery, channel_name in rows:
+        deliveries[delivery.event_id].append(DeliveryOut.build(delivery, channel_name))
+    return [EventOut.build(event, deliveries[event.id]) for event in events]

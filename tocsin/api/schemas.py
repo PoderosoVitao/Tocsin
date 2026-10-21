@@ -7,7 +7,18 @@ from typing import Any, Self
 from pydantic import BaseModel, Field, model_validator
 
 from tocsin.channels import validate_config
-from tocsin.models import Channel, ChannelKind, Check, CheckKind, Run, RunStatus, State
+from tocsin.models import (
+    Channel,
+    ChannelKind,
+    Check,
+    CheckKind,
+    Delivery,
+    DeliveryStatus,
+    Event,
+    Run,
+    RunStatus,
+    State,
+)
 from tocsin.schedule import ScheduleError, validate
 from tocsin.transitions import displayed_state
 
@@ -187,4 +198,55 @@ class RunSummary(BaseModel):
             finished_at=run.finished_at,
             duration_ms=run.duration_ms,
             exit_code=run.exit_code,
+        )
+
+
+# One attempt-tracked delivery of an event to a channel, as the dashboard's
+# alert views show it: what was sent where, how many tries it took, and why it
+# failed or when it will be retried.
+class DeliveryOut(BaseModel):
+    channel_id: uuid.UUID
+    channel_name: str
+    status: DeliveryStatus
+    attempts: int
+    last_error: str | None
+    next_attempt_at: datetime | None
+    sent_at: datetime | None
+
+    @classmethod
+    def build(cls, delivery: Delivery, channel_name: str) -> DeliveryOut:
+        return cls(
+            channel_id=delivery.channel_id,
+            channel_name=channel_name,
+            status=DeliveryStatus(delivery.status),
+            attempts=delivery.attempts,
+            last_error=delivery.last_error,
+            next_attempt_at=delivery.next_attempt_at,
+            sent_at=delivery.sent_at,
+        )
+
+
+class EventOut(BaseModel):
+    id: int
+    from_state: State
+    to_state: State
+    reason: str
+    created_at: datetime
+    run_id: int | None
+    # The change would have alerted but came inside the cooldown, so it was
+    # recorded and not sent (a later alert reports where the check settled).
+    suppressed: bool
+    deliveries: list[DeliveryOut]
+
+    @classmethod
+    def build(cls, event: Event, deliveries: list[DeliveryOut]) -> EventOut:
+        return cls(
+            id=event.id,
+            from_state=State(event.from_state),
+            to_state=State(event.to_state),
+            reason=event.reason,
+            created_at=event.created_at,
+            run_id=event.run_id,
+            suppressed=event.suppressed,
+            deliveries=deliveries,
         )
