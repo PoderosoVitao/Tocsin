@@ -4,8 +4,9 @@ Your cron jobs tell tocsin "I ran". Tocsin tells you when one of them didn't, an
 jobs, when the numbers got worse.
 
 > **Status: work in progress.** The core works and is tested: tocsin notices when a job misses
-> its schedule, fails or runs too long, and sends exactly one Telegram alert for it. The dashboard,
-> evaluation checks and failure summaries are still to come (see the
+> its schedule, fails or runs too long, and sends exactly one Telegram alert for it, and a first
+> dashboard page shows every check live. The check and alert-log pages, evaluation checks and
+> failure summaries are still to come (see the
 > [roadmap](#roadmap)).
 
 ## Why another job monitor
@@ -95,11 +96,17 @@ still runs, a warning goes to stderr, and the command's own exit code is returne
 - **States** `new`, `up`, `late` (past due, inside the grace period), `down` and `paused`, with
   every change recorded as an event.
 - **A JSON API** for checks and channels, protected by API keys. Channel tokens are never returned.
+- **Dashboard** at `/` (for example http://localhost:8000): sign in with an API key, kept in the
+  browser only. The overview lists every check with its state, last ping, next expected time and a
+  strip of its recent runs, problems first, and updates live without reloading. It is plain HTML,
+  CSS and JavaScript with no build step, and shares the Stochast dashboard's colours and dark mode.
+  The check page, alert log and settings are still to come.
 - **Live updates.** `GET /api/stream` is a Server-Sent Events stream of check changes
   (`check.updated`, `check.deleted`), fed by Redis pub/sub and published after each change is
   committed. The messages are hints to refresh, not data, and a lost one never fails a ping or a
   sweep. The stream needs an API key, so read it with `curl -N -H "Authorization: Bearer $KEY"`
-  or `fetch`; the browser's `EventSource` can't send headers.
+  or `fetch`; the browser's `EventSource` can't send headers, which is why the dashboard uses
+  `fetch`. `GET /api/overview` returns every check with its last 20 runs in one request.
 - **Rate limiting** per check in Redis (60 pings a minute by default). If Redis is down, pings are
   still accepted.
 - **Operations:** `/healthz`, and Prometheus metrics on `/metrics`, including
@@ -204,7 +211,8 @@ with nothing retrying it); and the API's health endpoint, when `TOCSIN_SELF_CHEC
 |---|---|---|
 | 1. Core | Checks, pings, overdue sweep, exactly-once Telegram alerts, API keys, rate limiting, metrics, CI, Docker Compose | Done |
 | 2. Usable | Start/finish runs and durations, CLI wrapper, flapping rules, self-monitoring | Done |
-| 3. Dashboard | Overview, check page, alert log, live updates | Next |
+| 3. Dashboard | Overview with live updates | Done |
+| | Check page, alert log, settings | Next |
 | 4. Eval checks | Result schema, statistics, alert rules, JUnit and Stochast adapters | Planned |
 | 5. Summaries | Redaction, LLM summaries (Claude, OpenAI and others), evaluation of the summariser | Planned |
 

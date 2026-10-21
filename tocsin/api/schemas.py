@@ -167,3 +167,24 @@ class RunOut(BaseModel):
             exit_code=run.exit_code,
             output_tail=run.output_tail,
         )
+
+
+# A run without its output, for lists of many runs.
+class RunSummary(BaseModel):
+    id: int
+    status: RunStatus
+    started_at: datetime | None
+    finished_at: datetime | None
+    duration_ms: int | None
+    exit_code: int | None
+
+    @classmethod
+    def build(cls, run: Run) -> RunSummary:
+        return cls(
+            id=run.id,
+            status=RunStatus(run.status),
+            started_at=run.started_at,
+            finished_at=run.finished_at,
+            duration_ms=run.duration_ms,
+            exit_code=run.exit_code,
+        )

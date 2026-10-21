@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tocsin</title>
+  <script>
+    try {
+      const saved = localStorage.getItem("tocsin-theme");
+      if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
+    } catch {}
+  </script>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Tocsin</div>
+    <div class="topbar-actions">
+      <span id="live" class="status-pill offline" hidden aria-live="polite">
+        <span class="status-icon" aria-hidden="true"></span><span class="status-text">Connecting</span>
+      </span>
+      <button type="button" id="theme-toggle" class="btn ghost" aria-label="Switch to dark mode">
+        <span class="theme-icon" aria-hidden="true">☾</span><span class="theme-label">Dark</span>
+      </button>
+      <button type="button" id="sign-out" class="btn ghost" hidden>Sign out</button>
+    </div>
+  </header>
+
+  <main id="login" class="page narrow" hidden>
+    <section class="panel">
+      <h1 class="panel-title">Sign in</h1>
+      <p class="hint">
+        Paste an API key. Create one with <code>tocsin keys create dashboard</code>. It is kept in
+        this browser only.
+      </p>
+      <form id="login-form" novalidate>
+        <div class="field">
+          <label for="key">API key</label>
+          <input id="key" name="key" type="password" autocomplete="off" placeholder="tsn_…" required />
+        </div>
+        <div id="login-error" class="alert" role="alert" hidden></div>
+        <div class="actions"><button type="submit" class="btn primary">Sign in</button></div>
+      </form>
+    </section>
+  </main>
+
+  <main id="overview" class="page" hidden>
+    <ul id="summary" class="summary" aria-label="Checks by state"></ul>
+    <div id="load-error" class="alert" role="alert" hidden></div>
+    <section class="panel checks-panel">
+      <div class="checks-head" aria-hidden="true">
+        <span>Check</span><span>State</span><span>Last ping</span><span>Next expected</span><span>Recent runs</span>
+      </div>
+      <ul id="checks" class="checks"></ul>
+      <div id="empty" class="empty" hidden>
+        <p><strong>No checks yet.</strong></p>
+        <p class="hint">
+          Create one with <code>POST /api/checks</code>, then have your job ping the URL it returns.
+          See the README for a walkthrough.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

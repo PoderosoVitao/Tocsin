@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Depends, FastAPI
+from fastapi import APIRouter, Depends, FastAPI, Request, Response
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from redis.asyncio import Redis
 
 from tocsin.alerts import Dispatcher
-from tocsin.api import channels, checks, health, ping, stream
+from tocsin.api import channels, checks, health, overview, ping, stream
 from tocsin.api.deps import require_api_key
 from tocsin.channels import Sender
 from tocsin.config import Settings, get_settings
@@ -17,6 +20,8 @@ from tocsin.db import Sessionmaker, create_engine, create_sessionmaker
 from tocsin.redis_client import fast_failing
 
 log = logging.getLogger(__name__)
+
+STATIC_DIR = Path(__file__).parent.parent / "static"
 
 
 # Builds the API app. Tests pass in their own connections; in production the
@@ -77,8 +82,27 @@ def create_app(
     api = APIRouter(prefix="/api", dependencies=[Depends(require_api_key)])
     api.include_router(checks.router)
     api.include_router(channels.router)
+    api.include_router(overview.router)
     api.include_router(stream.router)
     app.include_router(api)
     app.include_router(ping.router)
     app.include_router(health.router)
+
+    # The dashboard is plain static files, with no build step. Browsers are
+    # told to revalidate them so an update never pairs new HTML with a stale
+    # script.
+    @app.middleware("http")
+    async def revalidate_frontend(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        response = await call_next(request)
+        if request.url.path == "/" or request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
+    @app.get("/", include_in_schema=False)
+    async def dashboard() -> FileResponse:
+        return FileResponse(STATIC_DIR / "index.html")
+
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return app
