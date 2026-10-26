@@ -62,6 +62,31 @@
     </section>
   </main>
 
+  <main id="check-page" class="page" hidden>
+    <a href="#/" class="back">← All checks</a>
+    <div id="detail-error" class="alert" role="alert" hidden></div>
+    <section class="panel">
+      <header class="detail-head">
+        <h1 id="detail-title" class="detail-title"></h1>
+        <span id="detail-state"></span>
+      </header>
+      <dl id="detail-facts" class="facts"></dl>
+    </section>
+    <section class="panel">
+      <h2 class="panel-title">Runs</h2>
+      <div id="run-bars" class="bars" role="img"></div>
+      <ul id="run-list" class="rows"></ul>
+      <p id="runs-empty" class="hint" hidden>No runs yet. They appear once the job pings.</p>
+      <button type="button" id="more-runs" class="btn ghost" hidden>Show older runs</button>
+    </section>
+    <section class="panel">
+      <h2 class="panel-title">State changes and alerts</h2>
+      <ul id="event-list" class="rows"></ul>
+      <p id="events-empty" class="hint" hidden>Nothing has changed yet.</p>
+      <button type="button" id="more-events" class="btn ghost" hidden>Show older changes</button>
+    </section>
+  </main>
+
   <script type="module" src="/static/app.js"></script>
 </body>
 </html>

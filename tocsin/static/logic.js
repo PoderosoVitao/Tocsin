@@ -108,3 +108,65 @@ export function describeRuns(runs) {
   const passed = runs.filter((run) => run.status === "success").length;
   return `Last ${runs.length} runs, oldest first: ${passed} passed, ${failed} failed`;
 }
+
+// "#/checks/<uuid>" is a check's page; anything else is the overview. Alert
+// messages link to the first form.
+export function parseRoute(hash) {
+  const match = /^#\/checks\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(hash ?? "");
+  return match ? { page: "check", id: match[1].toLowerCase() } : { page: "overview" };
+}
+
+export function plural(count, word) {
+  return `${count} ${word}${count === 1 ? "" : "s"}`;
+}
+
+// One line for a state change: "Up → Down", or "Still down" for a reminder.
+export function describeTransition(event) {
+  if (event.from_state === "down" && event.to_state === "down") return "Still down";
+  return `${STATE_LABELS[event.from_state] ?? event.from_state} → ${STATE_LABELS[event.to_state] ?? event.to_state}`;
+}
+
+// What happened to one alert on one channel, in words, including why it
+// failed and when it will be tried again.
+export function describeDelivery(delivery, now = Date.now()) {
+  const where = delivery.channel_name;
+  const tries = plural(delivery.attempts, "attempt");
+  const error = delivery.last_error ? `: ${delivery.last_error}` : "";
+  switch (delivery.status) {
+    case "sent":
+      return delivery.attempts > 1 ? `Sent to ${where} after ${tries}` : `Sent to ${where}`;
+    case "failed":
+      return `Could not send to ${where} after ${tries}${error}`;
+    case "retrying":
+      return `Retrying ${where}, ${tries} so far${error}; next try ${relativeTime(delivery.next_attempt_at, now)}`;
+    default:
+      return `Queued for ${where}`;
+  }
+}
+
+// Heights (percent) for a bar chart of run durations. Runs that have no
+// duration (a finish with no start, or one still running) get a stub so they
+// still show.
+export function durationBars(runs) {
+  const longest = Math.max(0, ...runs.map((run) => run.duration_ms ?? 0));
+  return runs.map((run) => ({
+    run,
+    height: run.duration_ms && longest ? Math.max(6, Math.round((run.duration_ms / longest) * 100)) : 6,
+  }));
+}
+
+// Combines a fresh read of the newest `pageSize` items (newest first, ids
+// descending) with the older ones already on screen, so a refresh adds what is
+// new without dropping what "show older" loaded.
+//
+// If the fresh page came back short, it is everything there is. If it is full
+// and no longer overlaps what is on screen (more than a page arrived since),
+// the old items would leave a gap, so they are dropped and the person can load
+// older ones again.
+export function mergeNewest(existing, fresh, pageSize) {
+  if (fresh.length < pageSize) return { items: fresh, more: false };
+  const floor = fresh[fresh.length - 1].id;
+  if (existing.length === 0 || existing[0].id < floor) return { items: fresh, more: true };
+  const older = existing.filter((item) => item.id < floor);
+  return { items: [...fresh, ...older], more: older.length > 0 ? null : true };
+}
