@@ -5,8 +5,8 @@ jobs, when the numbers got worse.
 
 > **Status: work in progress.** The core works and is tested: tocsin notices when a job misses
 > its schedule, fails or runs too long, and sends exactly one Telegram alert for it, and a first
-> dashboard shows every check live, with a page for each one. The alert log, settings, evaluation
-> checks and failure summaries are still to come (see the
+> dashboard shows every check live, with a page for each one and an alert log. The settings page,
+> evaluation checks and failure summaries are still to come (see the
 > [roadmap](#roadmap)).
 
 ## Why another job monitor
@@ -103,7 +103,9 @@ still runs, a warning goes to stderr, and the command's own exit code is returne
   Each check has a page (`/#/checks/<id>`, the link in every alert) with its settings, a bar chart
   of run durations, the run list with expandable output tails, and its state changes with every
   alert delivery: which channel, how many attempts, the error, and when the next retry is. The
-  alert log and settings pages are still to come.
+  **alert log** (`/#/alerts`) lists every alert across all checks, newest first, and can be filtered
+  to failed, retrying, queued or sent ones, so an alert that never got through can't go unnoticed.
+  The settings page is still to come.
 - **Live updates.** `GET /api/stream` is a Server-Sent Events stream of check changes
   (`check.updated`, `check.deleted`), fed by Redis pub/sub and published after each change is
   committed. The messages are hints to refresh, not data, and a lost one never fails a ping or a
@@ -112,7 +114,9 @@ still runs, a warning goes to stderr, and the command's own exit code is returne
   `fetch`. `GET /api/overview` returns every check with its last 20 runs in one request, and
   `GET /api/checks/<id>/events` lists a check's state changes, newest first, each with the alert
   deliveries it caused: the channel, how many attempts, the last error and the next retry. Changes
-  held back by the cooldown are marked `suppressed`.
+  held back by the cooldown are marked `suppressed`. `GET /api/alerts` is the same deliveries across
+  every check, filterable with `?status=failed`. The stream also announces `alert.updated` when a
+  worker sends, retries or gives up on a delivery, so retries show on the dashboard as they happen.
 - **Rate limiting** per check in Redis (60 pings a minute by default). If Redis is down, pings are
   still accepted.
 - **Operations:** `/healthz`, and Prometheus metrics on `/metrics`, including
@@ -217,8 +221,8 @@ with nothing retrying it); and the API's health endpoint, when `TOCSIN_SELF_CHEC
 |---|---|---|
 | 1. Core | Checks, pings, overdue sweep, exactly-once Telegram alerts, API keys, rate limiting, metrics, CI, Docker Compose | Done |
 | 2. Usable | Start/finish runs and durations, CLI wrapper, flapping rules, self-monitoring | Done |
-| 3. Dashboard | Overview with live updates, check page | Done |
-| | Alert log, settings | Next |
+| 3. Dashboard | Overview with live updates, check page, alert log | Done |
+| | Settings (checks, channels, API keys) | Next |
 | 4. Eval checks | Result schema, statistics, alert rules, JUnit and Stochast adapters | Planned |
 | 5. Summaries | Redaction, LLM summaries (Claude, OpenAI and others), evaluation of the summariser | Planned |
 

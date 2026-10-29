@@ -250,3 +250,30 @@ class EventOut(BaseModel):
             suppressed=event.suppressed,
             deliveries=deliveries,
         )
+
+
+# A delivery in the alert log, which spans every check: the delivery itself
+# plus which check it was for and what had happened to it.
+class AlertOut(DeliveryOut):
+    id: int
+    created_at: datetime
+    check_id: uuid.UUID
+    check_name: str
+    from_state: State
+    to_state: State
+    reason: str
+
+    @classmethod
+    def from_rows(
+        cls, delivery: Delivery, channel_name: str, event: Event, check_name: str
+    ) -> AlertOut:
+        return cls(
+            **DeliveryOut.build(delivery, channel_name).model_dump(),
+            id=delivery.id,
+            created_at=delivery.created_at,
+            check_id=event.check_id,
+            check_name=check_name,
+            from_state=State(event.from_state),
+            to_state=State(event.to_state),
+            reason=event.reason,
+        )

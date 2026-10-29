@@ -1,4 +1,5 @@
 import {
+  ALERT_FILTERS,
   STATE_LABELS,
   STATE_ORDER,
   countByState,
@@ -13,6 +14,7 @@ import {
   parseRoute,
   parseSse,
   relativeTime,
+  shouldRefresh,
   sortChecks,
 } from "/static/logic.js";
 
@@ -32,6 +34,7 @@ let apiKey = readStorage(KEY_STORAGE);
 let route = parseRoute(location.hash);
 let checks = [];
 let detail = null; // { check, runs, events, moreRuns, moreEvents } for the open check page
+let alertLog = { status: "", items: [], more: false }; // the alert log page
 let streamAbort = null;
 let refreshTimer = null;
 let pollTimer = null;
@@ -220,9 +223,17 @@ function show(view) {
   $("login").hidden = view !== "login";
   $("overview").hidden = view !== "overview";
   $("check-page").hidden = view !== "check";
-  const signedIn = view === "overview" || view === "check";
+  $("alerts-page").hidden = view !== "alerts";
+  const signedIn = view !== "login";
   $("sign-out").hidden = !signedIn;
   $("live").hidden = !signedIn;
+  $("nav").hidden = !signedIn;
+  // A check's page belongs to the "Checks" section of the navigation.
+  const section = view === "check" ? "overview" : view;
+  for (const link of $("nav").querySelectorAll("a")) {
+    if (link.dataset.route === section) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  }
 }
 
 function setLive(isLive) {
@@ -300,6 +311,61 @@ async function refreshDetail() {
   }
 }
 
+function alertRow(alert) {
+  const row = el("li", "row");
+  const main = el("div", "row-main");
+  const link = el("a", "", alert.check_name);
+  link.href = `#/checks/${alert.check_id}`;
+  const time = el("span", "row-time", when(alert.created_at));
+  time.title = relativeTime(alert.created_at);
+  main.append(link, el("span", `delivery ${alert.status}`, describeDelivery(alert)), time);
+  row.append(main, el("div", "row-sub", `${describeTransition(alert)}: ${alert.reason}`));
+  return row;
+}
+
+function renderAlerts() {
+  $("alert-list").replaceChildren(...alertLog.items.map(alertRow));
+  const empty = $("alerts-empty");
+  empty.hidden = alertLog.items.length > 0;
+  empty.textContent = alertLog.status
+    ? "No alerts match this filter."
+    : "No alerts yet. They appear when a check goes down or recovers.";
+  $("more-alerts").hidden = !alertLog.more;
+}
+
+async function refreshAlerts() {
+  const status = alertLog.status;
+  const filter = status ? `&status=${status}` : "";
+  try {
+    const fresh = await (await api(`/api/alerts?limit=${PAGE_SIZE}${filter}`)).json();
+    if (route.page !== "alerts" || alertLog.status !== status) return; // moved on meanwhile
+    const merged = mergeNewest(alertLog.items, fresh, PAGE_SIZE);
+    alertLog = { status, items: merged.items, more: merged.more ?? alertLog.more };
+    $("alerts-error").hidden = true;
+    renderAlerts();
+  } catch (error) {
+    if (error.message === "unauthorized") return signOut("That key was not accepted.");
+    const box = $("alerts-error");
+    box.hidden = false;
+    box.textContent = `Could not load the alert log: ${error.message}`;
+  }
+}
+
+async function loadMoreAlerts() {
+  const last = alertLog.items.at(-1);
+  if (!last) return;
+  const status = alertLog.status;
+  const filter = status ? `&status=${status}` : "";
+  try {
+    const more = await (await api(`/api/alerts?limit=${PAGE_SIZE}&before=${last.id}${filter}`)).json();
+    if (alertLog.status !== status) return;
+    alertLog = { status, items: [...alertLog.items, ...more], more: more.length === PAGE_SIZE };
+    renderAlerts();
+  } catch (error) {
+    if (error.message === "unauthorized") signOut("That key was not accepted.");
+  }
+}
+
 async function loadMore(kind) {
   const items = detail[kind];
   const last = items.at(-1);
@@ -314,7 +380,8 @@ async function loadMore(kind) {
   }
 }
 
-const refresh = () => (route.page === "check" ? refreshDetail() : refreshOverview());
+const refreshers = { check: refreshDetail, alerts: refreshAlerts, overview: refreshOverview };
+const refresh = () => refreshers[route.page]();
 
 function scheduleRefresh() {
   clearTimeout(refreshTimer);
@@ -350,10 +417,7 @@ async function followStream() {
         const parsed = parseSse(buffer + value);
         buffer = parsed.rest;
         for (const { event, data } of parsed.events) {
-          if (!event.startsWith("check.")) continue;
-          // On a check's page only that check's changes matter.
-          if (route.page === "check" && data?.check_id !== route.id) continue;
-          scheduleRefresh();
+          if (shouldRefresh(route, event, data)) scheduleRefresh();
         }
       }
     } catch (error) {
@@ -369,6 +433,7 @@ function showRoute() {
   route = parseRoute(location.hash);
   if (!apiKey) return show("login");
   detail = null;
+  alertLog = { status: alertLog.status, items: [], more: false };
   show(route.page);
   window.scrollTo(0, 0);
   refresh();
@@ -427,6 +492,19 @@ $("login-form").addEventListener("submit", async (event) => {
 $("sign-out").addEventListener("click", () => signOut());
 $("more-runs").addEventListener("click", () => loadMore("runs"));
 $("more-events").addEventListener("click", () => loadMore("events"));
+$("more-alerts").addEventListener("click", loadMoreAlerts);
+$("alert-filter").replaceChildren(
+  ...ALERT_FILTERS.map(([value, label]) => {
+    const option = el("option", "", label);
+    option.value = value;
+    return option;
+  }),
+);
+$("alert-filter").addEventListener("change", (event) => {
+  alertLog = { status: event.target.value, items: [], more: false };
+  renderAlerts();
+  refreshAlerts();
+});
 window.addEventListener("hashchange", () => {
   if (apiKey) showRoute();
 });

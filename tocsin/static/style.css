@@ -203,3 +203,14 @@ pre.output { margin: 6px 0 0; padding: 8px 10px; background: var(--surface-sunke
   .cell-label { position: static; width: auto; height: auto; overflow: visible; clip-path: none; color: var(--ink-muted); font-size: 12px; min-width: 96px; }
   .page { padding: 12px; }
 }
+
+.nav { display: flex; gap: 4px; margin-right: auto; margin-left: 16px; }
+.nav a { color: var(--ink-secondary); text-decoration: none; padding: 4px 10px; border-radius: 6px; white-space: nowrap; }
+.nav a:hover { color: var(--ink); }
+.nav a[aria-current="page"] { color: var(--ink); background: var(--surface-sunken); border: 1px solid var(--border); font-weight: 600; }
+.filter { display: inline-flex; align-items: center; gap: 8px; font-weight: 400; color: var(--ink-secondary); }
+select { font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 6px; padding: 5px 8px; }
+select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row-main a { font-weight: 600; color: inherit; }
+.row-main .delivery { flex: 1 1 240px; }
+@media (max-width: 760px) { .nav { margin-left: 8px; } .brand { display: none; } }

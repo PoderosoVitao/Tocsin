@@ -27,6 +27,13 @@ def check_updated(check: Check) -> dict[str, Any]:
     }
 
 
+# An alert delivery changed (sent, will be retried, or gave up). It happens in
+# a worker, away from the pings and sweeps that publish the other events, so
+# the alert log and check pages would otherwise not hear about retries.
+def alert_updated(check_id: uuid.UUID) -> dict[str, Any]:
+    return {"type": "alert.updated", "check_id": str(check_id)}
+
+
 def check_deleted(check_id: uuid.UUID) -> dict[str, Any]:
     return {"type": "check.deleted", "check_id": str(check_id)}
 

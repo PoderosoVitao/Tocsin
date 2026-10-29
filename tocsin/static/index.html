@@ -15,6 +15,10 @@
 <body>
   <header class="topbar">
     <div class="brand">Tocsin</div>
+    <nav id="nav" class="nav" aria-label="Pages" hidden>
+      <a href="#/" data-route="overview">Checks</a>
+      <a href="#/alerts" data-route="alerts">Alert log</a>
+    </nav>
     <div class="topbar-actions">
       <span id="live" class="status-pill offline" hidden aria-live="polite">
         <span class="status-icon" aria-hidden="true"></span><span class="status-text">Connecting</span>
@@ -84,6 +88,22 @@
       <ul id="event-list" class="rows"></ul>
       <p id="events-empty" class="hint" hidden>Nothing has changed yet.</p>
       <button type="button" id="more-events" class="btn ghost" hidden>Show older changes</button>
+    </section>
+  </main>
+
+  <main id="alerts-page" class="page" hidden>
+    <div id="alerts-error" class="alert" role="alert" hidden></div>
+    <section class="panel">
+      <header class="detail-head">
+        <h1 class="detail-title">Alert log</h1>
+        <label class="filter">Show
+          <select id="alert-filter"></select>
+        </label>
+      </header>
+      <p class="hint">Every alert tocsin tried to send, where, how many attempts it took, and what went wrong.</p>
+      <ul id="alert-list" class="rows"></ul>
+      <p id="alerts-empty" class="hint" hidden></p>
+      <button type="button" id="more-alerts" class="btn ghost" hidden>Show older alerts</button>
     </section>
   </main>
 

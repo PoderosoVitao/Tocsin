@@ -113,7 +113,29 @@ export function describeRuns(runs) {
 // messages link to the first form.
 export function parseRoute(hash) {
   const match = /^#\/checks\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(hash ?? "");
-  return match ? { page: "check", id: match[1].toLowerCase() } : { page: "overview" };
+  if (match) return { page: "check", id: match[1].toLowerCase() };
+  return hash === "#/alerts" ? { page: "alerts" } : { page: "overview" };
+}
+
+export const ALERT_FILTERS = [
+  ["", "All alerts"],
+  ["failed", "Failed"],
+  ["retrying", "Retrying"],
+  ["pending", "Queued"],
+  ["sent", "Sent"],
+];
+
+// Whether a message from the live stream means the page being shown is out of
+// date. A check page only cares about its own check; the alert log cares about
+// any change that can create or update an alert; the overview doesn't show
+// alerts at all.
+export function shouldRefresh(route, event, data) {
+  const isCheckEvent = event.startsWith("check.");
+  const isAlertEvent = event === "alert.updated";
+  if (!isCheckEvent && !isAlertEvent) return false;
+  if (route.page === "check") return data?.check_id === route.id;
+  if (route.page === "alerts") return true;
+  return isCheckEvent;
 }
 
 export function plural(count, word) {

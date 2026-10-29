@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 
 import httpx
 from redis.asyncio import Redis
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 from taskiq import AsyncBroker, Context, TaskiqDepends, TaskiqEvents, TaskiqScheduler, TaskiqState
 from taskiq.kicker import AsyncKicker
@@ -19,7 +20,9 @@ from tocsin.channels import Sender
 from tocsin.channels.telegram import TelegramSender
 from tocsin.config import Settings, get_settings
 from tocsin.db import Sessionmaker, create_engine, create_sessionmaker
+from tocsin.events import alert_updated, publish
 from tocsin.heartbeat import HEARTBEAT_INTERVAL_SECONDS, heartbeat
+from tocsin.models import Event
 from tocsin.sweep import run_sweep
 
 log = logging.getLogger(__name__)
@@ -97,13 +100,21 @@ def register_tasks(broker: AsyncBroker, settings: Settings) -> None:
     ) -> str:
         resources: Resources = context.state.resources
         key = DeliveryKey(event_id, uuid.UUID(channel_id))
-        return await deliver(
+        status = await deliver(
             resources.sessionmaker,
             resources.senders,
             resources.settings,
             key,
             datetime.now(UTC),
         )
+        # "busy" means another worker is on it and will report; anything else
+        # changed or confirmed the delivery's state.
+        if status != "busy":
+            async with resources.sessionmaker() as session:
+                check_id = await session.scalar(select(Event.check_id).where(Event.id == event_id))
+            if check_id is not None:
+                await publish(resources.redis, alert_updated(check_id))
+        return status
 
     # Queues retries that are due and deliveries whose first enqueue was lost.
     @broker.task(task_name=RELAY_DELIVERIES, schedule=[{"interval": RELAY_INTERVAL_SECONDS}])
