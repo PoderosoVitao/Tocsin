@@ -214,3 +214,30 @@ select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .row-main a { font-weight: 600; color: inherit; }
 .row-main .delivery { flex: 1 1 240px; }
 @media (max-width: 760px) { .nav { margin-left: 8px; } .brand { display: none; } }
+
+.panel-title { margin: 0; }
+.detail-head .panel-title { font-size: 18px; }
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+fieldset.field { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; margin: 0 0 12px; }
+legend { font-weight: 600; padding: 0 4px; }
+.check-label { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-weight: 400; }
+.check-label input { width: auto; }
+
+dialog { max-height: calc(100vh - 24px); overflow-y: auto; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--ink); padding: 20px; width: min(520px, calc(100vw - 24px)); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3); }
+dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
+dialog .panel-title { margin-bottom: 12px; }
+dialog form .actions { margin-top: 4px; }
+
+.notice { background: var(--good-wash); border: 1px solid var(--good-border); border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; }
+.notice p { margin: 0 0 6px; }
+.notice input { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.row-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.btn.small { padding: 3px 10px; font-size: 13px; }
+.btn.danger { background: transparent; color: var(--critical-ink); border-color: var(--critical-border); }
+.btn.danger:hover { background: var(--critical-wash); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.row-status { color: var(--ink-secondary); }
+.row-status.bad { color: var(--critical-ink); }
+.row-status.good { color: var(--good-ink); }
+@media (max-width: 760px) { .field-row { grid-template-columns: 1fr; } .nav { flex-wrap: wrap; } }

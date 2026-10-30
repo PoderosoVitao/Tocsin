@@ -18,6 +18,7 @@
     <nav id="nav" class="nav" aria-label="Pages" hidden>
       <a href="#/" data-route="overview">Checks</a>
       <a href="#/alerts" data-route="alerts">Alert log</a>
+      <a href="#/settings" data-route="settings">Settings</a>
     </nav>
     <div class="topbar-actions">
       <span id="live" class="status-pill offline" hidden aria-live="polite">
@@ -106,6 +107,98 @@
       <button type="button" id="more-alerts" class="btn ghost" hidden>Show older alerts</button>
     </section>
   </main>
+
+  <main id="settings-page" class="page" hidden>
+    <div id="settings-error" class="alert" role="alert" hidden></div>
+
+    <section class="panel">
+      <header class="detail-head">
+        <h1 class="detail-title">Checks</h1>
+        <button type="button" id="new-check" class="btn primary">New check</button>
+      </header>
+      <ul id="settings-checks" class="rows"></ul>
+      <p id="settings-checks-empty" class="hint" hidden>No checks yet. Create one, then have your job ping its URL.</p>
+    </section>
+
+    <section class="panel">
+      <header class="detail-head">
+        <h2 class="panel-title">Alert channels</h2>
+        <button type="button" id="new-channel" class="btn primary">Add Telegram chat</button>
+      </header>
+      <ul id="settings-channels" class="rows"></ul>
+      <p id="settings-channels-empty" class="hint" hidden>No channels yet, so no alerts will be sent. Add one to be told when a check fails.</p>
+    </section>
+
+    <section class="panel">
+      <header class="detail-head">
+        <h2 class="panel-title">API keys</h2>
+        <button type="button" id="new-key" class="btn primary">Create key</button>
+      </header>
+      <div id="new-key-notice" class="notice" hidden>
+        <p><strong>Copy this key now. It is not shown again.</strong></p>
+        <input id="new-key-value" readonly aria-label="The new API key" />
+      </div>
+      <ul id="settings-keys" class="rows"></ul>
+    </section>
+  </main>
+
+  <dialog id="check-dialog" aria-labelledby="check-dialog-title">
+    <form id="check-form" novalidate>
+      <h2 id="check-dialog-title" class="panel-title">New check</h2>
+      <div class="field"><label for="f-name">Name</label><input id="f-name" required autocomplete="off" /></div>
+      <div class="field">
+        <label for="f-schedule">Schedule</label>
+        <input id="f-schedule" required autocomplete="off" placeholder="0 3 * * *   or   @every 90m   or   @daily" />
+        <p class="hint">A cron expression (minute hour day month weekday), an alias like <code>@daily</code>, or <code>@every 90m</code>.</p>
+      </div>
+      <div class="field"><label for="f-timezone">Timezone</label><input id="f-timezone" required autocomplete="off" placeholder="Europe/Lisbon" /></div>
+      <div class="field-row">
+        <div class="field"><label for="f-grace">Grace period (minutes)</label><input id="f-grace" type="number" min="0" step="any" required /></div>
+        <div class="field"><label for="f-cooldown">Cooldown (minutes)</label><input id="f-cooldown" type="number" min="0" step="any" required /></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label for="f-maxrun">Longest run allowed (minutes)</label><input id="f-maxrun" type="number" min="0" step="any" placeholder="no limit" /></div>
+        <div class="field"><label for="f-reminder">Remind while down, every (hours)</label><input id="f-reminder" type="number" min="0" step="any" placeholder="never" /></div>
+      </div>
+      <fieldset class="field" id="f-channels-box">
+        <legend>Alert these channels</legend>
+        <div id="f-channels"></div>
+      </fieldset>
+      <div id="check-form-error" class="alert" role="alert" hidden></div>
+      <div class="actions">
+        <button type="submit" class="btn primary">Save</button>
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="channel-dialog" aria-labelledby="channel-dialog-title">
+    <form id="channel-form" novalidate>
+      <h2 id="channel-dialog-title" class="panel-title">Add a Telegram chat</h2>
+      <p class="hint">Create a bot with @BotFather to get a token, send the bot a message, then read your chat id from <code>https://api.telegram.org/bot&lt;token&gt;/getUpdates</code>.</p>
+      <div class="field"><label for="c-name">Name</label><input id="c-name" required autocomplete="off" placeholder="phone" /></div>
+      <div class="field"><label for="c-token">Bot token</label><input id="c-token" type="password" required autocomplete="off" /></div>
+      <div class="field"><label for="c-chat">Chat id</label><input id="c-chat" required autocomplete="off" /></div>
+      <label class="check-label"><input id="c-attach" type="checkbox" checked /> Alert this channel for every existing check</label>
+      <div id="channel-form-error" class="alert" role="alert" hidden></div>
+      <div class="actions">
+        <button type="submit" class="btn primary">Add channel</button>
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="key-dialog" aria-labelledby="key-dialog-title">
+    <form id="key-form" novalidate>
+      <h2 id="key-dialog-title" class="panel-title">Create an API key</h2>
+      <div class="field"><label for="k-name">Name</label><input id="k-name" required autocomplete="off" placeholder="laptop" /></div>
+      <div id="key-form-error" class="alert" role="alert" hidden></div>
+      <div class="actions">
+        <button type="submit" class="btn primary">Create key</button>
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+      </div>
+    </form>
+  </dialog>
 
   <script type="module" src="/static/app.js"></script>
 </body>

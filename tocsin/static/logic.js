@@ -114,7 +114,9 @@ export function describeRuns(runs) {
 export function parseRoute(hash) {
   const match = /^#\/checks\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(hash ?? "");
   if (match) return { page: "check", id: match[1].toLowerCase() };
-  return hash === "#/alerts" ? { page: "alerts" } : { page: "overview" };
+  if (hash === "#/alerts") return { page: "alerts" };
+  if (hash === "#/settings") return { page: "settings" };
+  return { page: "overview" };
 }
 
 export const ALERT_FILTERS = [
@@ -135,6 +137,7 @@ export function shouldRefresh(route, event, data) {
   if (!isCheckEvent && !isAlertEvent) return false;
   if (route.page === "check") return data?.check_id === route.id;
   if (route.page === "alerts") return true;
+  // The settings page lists checks, so it follows them; alerts it doesn't show.
   return isCheckEvent;
 }
 
@@ -191,4 +194,58 @@ export function mergeNewest(existing, fresh, pageSize) {
   if (existing.length === 0 || existing[0].id < floor) return { items: fresh, more: true };
   const older = existing.filter((item) => item.id < floor);
   return { items: [...fresh, ...older], more: older.length > 0 ? null : true };
+}
+
+// The check form takes friendly units (minutes, hours); the API takes seconds.
+// An empty optional field means "none".
+export function formToCheckBody(form) {
+  const seconds = (value, unit) => (String(value).trim() === "" ? null : Math.round(Number(value) * unit));
+  return {
+    name: form.name.trim(),
+    schedule: form.schedule.trim(),
+    timezone: form.timezone.trim(),
+    grace_seconds: seconds(form.grace, 60),
+    max_duration_seconds: seconds(form.maxRun, 60),
+    cooldown_seconds: seconds(form.cooldown, 60),
+    reminder_seconds: seconds(form.reminder, 3600),
+  };
+}
+
+export function checkToForm(check) {
+  const minutes = (value) => (value === null || value === undefined ? "" : String(value / 60));
+  return {
+    name: check.name,
+    schedule: check.schedule,
+    timezone: check.timezone,
+    grace: minutes(check.grace_seconds),
+    maxRun: minutes(check.max_duration_seconds),
+    cooldown: minutes(check.cooldown_seconds),
+    reminder: check.reminder_seconds ? String(check.reminder_seconds / 3600) : "",
+  };
+}
+
+// A readable message from an error response. FastAPI sends a string for its
+// own errors and a list for validation errors, whose messages often start
+// with "Value error, " and name a field as the last part of "loc".
+export function errorMessage(status, payload) {
+  const detail = payload?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail) && detail.length) {
+    return detail
+      .map((item) => {
+        const field = Array.isArray(item.loc) ? item.loc.at(-1) : null;
+        const text = String(item.msg ?? "invalid").replace(/^Value error, /, "");
+        return field && field !== "body" ? `${field}: ${text}` : text;
+      })
+      .join("; ");
+  }
+  return `the server answered ${status}`;
+}
+
+// A channel's saved settings, with the secret already masked by the server.
+export function describeChannel(channel) {
+  const parts = [channel.kind];
+  if (channel.config.chat_id) parts.push(`chat ${channel.config.chat_id}`);
+  if (channel.config.bot_token) parts.push(`bot ${channel.config.bot_token}`);
+  return parts.join(" · ");
 }

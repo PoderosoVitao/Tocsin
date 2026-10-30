@@ -5,8 +5,8 @@ jobs, when the numbers got worse.
 
 > **Status: work in progress.** The core works and is tested: tocsin notices when a job misses
 > its schedule, fails or runs too long, and sends exactly one Telegram alert for it, and a first
-> dashboard shows every check live, with a page for each one and an alert log. The settings page,
-> evaluation checks and failure summaries are still to come (see the
+> dashboard shows and manages everything. Evaluation checks and failure summaries are still to
+> come (see the
 > [roadmap](#roadmap)).
 
 ## Why another job monitor
@@ -107,7 +107,9 @@ still runs, a warning goes to stderr, and the command's own exit code is returne
   alert delivery: which channel, how many attempts, the error, and when the next retry is. The
   **alert log** (`/#/alerts`) lists every alert across all checks, newest first, and can be filtered
   to failed, retrying, queued or sent ones, so an alert that never got through can't go unnoticed.
-  The settings page is still to come.
+  The **settings** page (`/#/settings`) creates, edits, pauses and deletes checks (times in minutes
+  and hours), adds Telegram chats and sends them a test message, and creates and revokes API keys.
+  Secrets are never shown again: a bot token appears masked, and a new API key is displayed once.
 - **Live updates.** `GET /api/stream` is a Server-Sent Events stream of check changes
   (`check.updated`, `check.deleted`), fed by Redis pub/sub and published after each change is
   committed. The messages are hints to refresh, not data, and a lost one never fails a ping or a
@@ -223,9 +225,8 @@ with nothing retrying it); and the API's health endpoint, when `TOCSIN_SELF_CHEC
 |---|---|---|
 | 1. Core | Checks, pings, overdue sweep, exactly-once Telegram alerts, API keys, rate limiting, metrics, CI, Docker Compose | Done |
 | 2. Usable | Start/finish runs and durations, CLI wrapper, flapping rules, self-monitoring | Done |
-| 3. Dashboard | Overview with live updates, check page, alert log | Done |
-| | Settings (checks, channels, API keys) | Next |
-| 4. Eval checks | Result schema, statistics, alert rules, JUnit and Stochast adapters | Planned |
+| 3. Dashboard | Overview with live updates, check page, alert log, settings | Done |
+| 4. Eval checks | Result schema, statistics, alert rules, JUnit and Stochast adapters | Next |
 | 5. Summaries | Redaction, LLM summaries (Claude, OpenAI and others), evaluation of the summariser | Planned |
 
 ## Development

@@ -2,11 +2,15 @@ import {
   ALERT_FILTERS,
   STATE_LABELS,
   STATE_ORDER,
+  checkToForm,
   countByState,
+  describeChannel,
   describeDelivery,
   describeRuns,
   describeTransition,
   durationBars,
+  errorMessage,
+  formToCheckBody,
   formatDuration,
   formatSpan,
   mergeNewest,
@@ -35,6 +39,8 @@ let route = parseRoute(location.hash);
 let checks = [];
 let detail = null; // { check, runs, events, moreRuns, moreEvents } for the open check page
 let alertLog = { status: "", items: [], more: false }; // the alert log page
+let settings = { checks: [], channels: [], keys: [] }; // the settings page
+let editing = null; // the check being edited in the dialog, or null for a new one
 let streamAbort = null;
 let refreshTimer = null;
 let pollTimer = null;
@@ -224,6 +230,7 @@ function show(view) {
   $("overview").hidden = view !== "overview";
   $("check-page").hidden = view !== "check";
   $("alerts-page").hidden = view !== "alerts";
+  $("settings-page").hidden = view !== "settings";
   const signedIn = view !== "login";
   $("sign-out").hidden = !signedIn;
   $("live").hidden = !signedIn;
@@ -250,6 +257,8 @@ function signOut(message) {
   clearTimeout(refreshTimer);
   checks = [];
   detail = null;
+  $("new-key-notice").hidden = true;
+  $("new-key-value").value = "";
   const error = $("login-error");
   error.hidden = !message;
   error.textContent = message ?? "";
@@ -380,7 +389,12 @@ async function loadMore(kind) {
   }
 }
 
-const refreshers = { check: refreshDetail, alerts: refreshAlerts, overview: refreshOverview };
+const refreshers = {
+  check: refreshDetail,
+  alerts: refreshAlerts,
+  overview: refreshOverview,
+  settings: refreshSettings,
+};
 const refresh = () => refreshers[route.page]();
 
 function scheduleRefresh() {
@@ -429,10 +443,287 @@ async function followStream() {
   }
 }
 
+// Sends a change to the API. Resolves to the response body (null for 204) or
+// throws an Error with a message fit to show to a person.
+async function send(method, path, body) {
+  const response = await fetch(path, {
+    method,
+    headers: { Authorization: `Bearer ${apiKey}`, ...(body ? { "Content-Type": "application/json" } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (response.status === 401) throw new Error("unauthorized");
+  if (response.status === 204) return null;
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(errorMessage(response.status, payload));
+  return payload;
+}
+
+function showFormError(id, error) {
+  if (error.message === "unauthorized") return signOut("That key was not accepted.");
+  const box = $(id);
+  box.hidden = false;
+  box.textContent = error.message;
+}
+
+function actionButton(label, onClick, className = "") {
+  const button = el("button", `btn ghost small ${className}`.trim(), label);
+  button.type = "button";
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function settingsCheckRow(check) {
+  const row = el("li", "row");
+  const main = el("div", "row-main");
+  const link = el("a", "", check.name);
+  link.href = `#/checks/${check.id}`;
+  main.append(link, stateBadge(check.state), el("span", "check-schedule", `${check.schedule} · ${check.timezone}`));
+  const actions = el("div", "row-actions");
+  const paused = check.state === "paused";
+  actions.append(
+    actionButton("Edit", () => openCheckDialog(check)),
+    actionButton(paused ? "Resume" : "Pause", () => changeCheck(check, { paused: !paused })),
+    actionButton("Delete", () => deleteCheck(check), "danger"),
+  );
+  row.append(main, actions);
+  return row;
+}
+
+function settingsChannelRow(channel) {
+  const row = el("li", "row");
+  const main = el("div", "row-main");
+  main.append(el("strong", "", channel.name), el("span", "check-schedule", describeChannel(channel)));
+  const status = el("span", "row-status");
+  status.setAttribute("aria-live", "polite");
+  const actions = el("div", "row-actions");
+  actions.append(
+    actionButton("Send test message", () => testChannel(channel, status)),
+    actionButton("Delete", () => deleteChannel(channel), "danger"),
+    status,
+  );
+  row.append(main, actions);
+  return row;
+}
+
+function settingsKeyRow(key) {
+  const row = el("li", "row");
+  const main = el("div", "row-main");
+  const mine = apiKey && apiKey.startsWith(key.prefix);
+  main.append(el("strong", "", key.name), el("span", "check-schedule", `${key.prefix}…`));
+  if (mine) main.append(el("span", "tag", "this browser"));
+  if (key.revoked_at) main.append(el("span", "tag", `revoked ${relativeTime(key.revoked_at)}`));
+  const detail = `Created ${when(key.created_at)} · ${key.last_used_at ? `last used ${relativeTime(key.last_used_at)}` : "never used"}`;
+  row.append(main, el("div", "row-sub", detail));
+  if (!key.revoked_at) {
+    const revoke = actionButton("Revoke", () => revokeKey(key), "danger");
+    if (mine) {
+      revoke.disabled = true;
+      revoke.title = "This is the key you are signed in with";
+    }
+    const actions = el("div", "row-actions");
+    actions.append(revoke);
+    row.append(actions);
+  }
+  return row;
+}
+
+function renderSettings() {
+  const { checks: list, channels, keys } = settings;
+  $("settings-checks").replaceChildren(...sortChecks(list).map(settingsCheckRow));
+  $("settings-checks-empty").hidden = list.length > 0;
+  $("settings-channels").replaceChildren(...channels.map(settingsChannelRow));
+  $("settings-channels-empty").hidden = channels.length > 0;
+  $("settings-keys").replaceChildren(...keys.map(settingsKeyRow));
+}
+
+async function refreshSettings() {
+  try {
+    const [checkList, channels, keys] = await Promise.all([
+      api("/api/checks").then((r) => r.json()),
+      api("/api/channels").then((r) => r.json()),
+      api("/api/keys").then((r) => r.json()),
+    ]);
+    if (route.page !== "settings") return;
+    settings = { checks: checkList, channels, keys };
+    $("settings-error").hidden = true;
+    renderSettings();
+  } catch (error) {
+    if (error.message === "unauthorized") return signOut("That key was not accepted.");
+    const box = $("settings-error");
+    box.hidden = false;
+    box.textContent = `Could not load settings: ${error.message}`;
+  }
+}
+
+// Runs a change from a button, then reloads; a failure is shown on the page.
+async function act(work) {
+  try {
+    await work();
+    $("settings-error").hidden = true;
+  } catch (error) {
+    if (error.message === "unauthorized") return signOut("That key was not accepted.");
+    const box = $("settings-error");
+    box.hidden = false;
+    box.textContent = error.message;
+  }
+  await refreshSettings();
+}
+
+const changeCheck = (check, patch) => act(() => send("PATCH", `/api/checks/${check.id}`, patch));
+
+function deleteCheck(check) {
+  if (!confirm(`Delete "${check.name}"? Its run history and alerts are deleted with it.`)) return;
+  return act(() => send("DELETE", `/api/checks/${check.id}`));
+}
+
+function deleteChannel(channel) {
+  if (!confirm(`Delete the channel "${channel.name}"? Checks stop alerting it.`)) return;
+  return act(() => send("DELETE", `/api/channels/${channel.id}`));
+}
+
+function revokeKey(key) {
+  if (!confirm(`Revoke the key "${key.name}"? Anything using it stops working immediately.`)) return;
+  return act(() => send("DELETE", `/api/keys/${key.id}`));
+}
+
+async function testChannel(channel, status) {
+  status.className = "row-status";
+  status.textContent = "Sending…";
+  try {
+    await send("POST", `/api/channels/${channel.id}/test`);
+    status.className = "row-status good";
+    status.textContent = "Sent. Check the chat.";
+  } catch (error) {
+    if (error.message === "unauthorized") return signOut("That key was not accepted.");
+    status.className = "row-status bad";
+    status.textContent = error.message;
+  }
+}
+
+function openCheckDialog(check = null) {
+  editing = check;
+  const values = check
+    ? checkToForm(check)
+    : {
+        name: "",
+        schedule: "",
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+        grace: "5",
+        maxRun: "",
+        cooldown: "5",
+        reminder: "",
+      };
+  $("check-dialog-title").textContent = check ? `Edit ${check.name}` : "New check";
+  $("f-name").value = values.name;
+  $("f-schedule").value = values.schedule;
+  $("f-timezone").value = values.timezone;
+  $("f-grace").value = values.grace;
+  $("f-maxrun").value = values.maxRun;
+  $("f-cooldown").value = values.cooldown;
+  $("f-reminder").value = values.reminder;
+  const chosen = new Set(check ? check.channel_ids : settings.channels.map((c) => c.id));
+  $("f-channels").replaceChildren(
+    ...(settings.channels.length
+      ? settings.channels.map((channel) => {
+          const label = el("label", "check-label");
+          const box = el("input");
+          box.type = "checkbox";
+          box.value = channel.id;
+          box.checked = chosen.has(channel.id);
+          label.append(box, document.createTextNode(` ${channel.name}`));
+          return label;
+        })
+      : [el("p", "hint", "No channels yet. Add one below to be alerted.")]),
+  );
+  $("check-form-error").hidden = true;
+  $("check-dialog").showModal();
+  $("f-name").focus();
+}
+
+$("check-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const body = formToCheckBody({
+    name: $("f-name").value,
+    schedule: $("f-schedule").value,
+    timezone: $("f-timezone").value,
+    grace: $("f-grace").value,
+    maxRun: $("f-maxrun").value,
+    cooldown: $("f-cooldown").value,
+    reminder: $("f-reminder").value,
+  });
+  if (!body.name || !body.schedule || body.grace_seconds === null || body.cooldown_seconds === null) {
+    return showFormError("check-form-error", new Error("Name, schedule, grace period and cooldown are required."));
+  }
+  if (settings.channels.length) {
+    body.channel_ids = [...$("f-channels").querySelectorAll("input:checked")].map((box) => box.value);
+  }
+  try {
+    if (editing) await send("PATCH", `/api/checks/${editing.id}`, body);
+    else await send("POST", "/api/checks", body);
+  } catch (error) {
+    return showFormError("check-form-error", error);
+  }
+  $("check-dialog").close();
+  refreshSettings();
+});
+
+$("channel-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const body = {
+    kind: "telegram",
+    name: $("c-name").value.trim(),
+    config: { bot_token: $("c-token").value.trim(), chat_id: $("c-chat").value.trim() },
+    attach_to_existing_checks: $("c-attach").checked,
+  };
+  if (!body.name) return showFormError("channel-form-error", new Error("Give the channel a name."));
+  try {
+    await send("POST", "/api/channels", body);
+  } catch (error) {
+    return showFormError("channel-form-error", error);
+  }
+  $("channel-form").reset();
+  $("channel-dialog").close();
+  refreshSettings();
+});
+
+$("key-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const name = $("k-name").value.trim();
+  if (!name) return showFormError("key-form-error", new Error("Give the key a name."));
+  try {
+    const created = await send("POST", "/api/keys", { name });
+    $("new-key-value").value = created.key;
+    $("new-key-notice").hidden = false;
+  } catch (error) {
+    return showFormError("key-form-error", error);
+  }
+  $("key-form").reset();
+  $("key-dialog").close();
+  refreshSettings();
+  $("new-key-value").select();
+});
+
+$("new-check").addEventListener("click", () => openCheckDialog());
+$("new-channel").addEventListener("click", () => {
+  $("channel-form-error").hidden = true;
+  $("channel-dialog").showModal();
+  $("c-name").focus();
+});
+$("new-key").addEventListener("click", () => {
+  $("key-form-error").hidden = true;
+  $("key-dialog").showModal();
+  $("k-name").focus();
+});
+for (const button of document.querySelectorAll("dialog [data-close]")) {
+  button.addEventListener("click", () => button.closest("dialog").close());
+}
+
 function showRoute() {
   route = parseRoute(location.hash);
   if (!apiKey) return show("login");
   detail = null;
+  $("new-key-notice").hidden = true;
+  $("new-key-value").value = "";
   alertLog = { status: alertLog.status, items: [], more: false };
   show(route.page);
   window.scrollTo(0, 0);
