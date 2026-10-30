@@ -95,7 +95,9 @@ still runs, a warning goes to stderr, and the command's own exit code is returne
   alert while a check stays down.
 - **States** `new`, `up`, `late` (past due, inside the grace period), `down` and `paused`, with
   every change recorded as an event.
-- **A JSON API** for checks and channels, protected by API keys. Channel tokens are never returned.
+- **A JSON API** for checks and channels, protected by API keys. Keys can be created, listed and
+  revoked through `/api/keys` as well as the CLI; the key is shown once when created, and the key
+  you are using can't be revoked, so you can't lock yourself out. Channel tokens are never returned.
 - **Dashboard** at `/` (for example http://localhost:8000): sign in with an API key, kept in the
   browser only. The overview lists every check with its state, last ping, next expected time and a
   strip of its recent runs, problems first, and updates live without reloading. It is plain HTML,

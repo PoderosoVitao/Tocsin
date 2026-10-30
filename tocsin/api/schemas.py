@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from tocsin.channels import validate_config
 from tocsin.models import (
+    ApiKey,
     Channel,
     ChannelKind,
     Check,
@@ -277,3 +278,34 @@ class AlertOut(DeliveryOut):
             to_state=State(event.to_state),
             reason=event.reason,
         )
+
+
+class KeyIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
+# An API key as listed: enough to tell keys apart and see which are in use,
+# never the key itself or its hash.
+class KeyOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    prefix: str
+    created_at: datetime
+    last_used_at: datetime | None
+    revoked_at: datetime | None
+
+    @classmethod
+    def build(cls, key: ApiKey) -> KeyOut:
+        return cls(
+            id=key.id,
+            name=key.name,
+            prefix=key.prefix,
+            created_at=key.created_at,
+            last_used_at=key.last_used_at,
+            revoked_at=key.revoked_at,
+        )
+
+
+# The response to creating a key: the only time the key itself is shown.
+class KeyCreated(KeyOut):
+    key: str
