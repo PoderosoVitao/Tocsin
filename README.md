@@ -226,7 +226,8 @@ with nothing retrying it); and the API's health endpoint, when `TOCSIN_SELF_CHEC
 | 1. Core | Checks, pings, overdue sweep, exactly-once Telegram alerts, API keys, rate limiting, metrics, CI, Docker Compose | Done |
 | 2. Usable | Start/finish runs and durations, CLI wrapper, flapping rules, self-monitoring | Done |
 | 3. Dashboard | Overview with live updates, check page, alert log, settings | Done |
-| 4. Eval checks | Result schema, statistics, alert rules, JUnit and Stochast adapters | Next |
+| 4. Eval checks | Statistics: Wilson intervals, regression test against a baseline | Done |
+| | Result schema, alert rules, eval page, JUnit and Stochast adapters | Next |
 | 5. Summaries | Redaction, LLM summaries (Claude, OpenAI and others), evaluation of the summariser | Planned |
 
 ## Development
