@@ -37,7 +37,7 @@ async def _handle(
     return response
 
 
-_REJECTIONS = {400: "bad_signal", 404: "not_found", 429: "rate_limited"}
+_REJECTIONS = {400: "bad_signal", 404: "not_found", 422: "bad_report", 429: "rate_limited"}
 
 
 async def _record(
@@ -56,7 +56,11 @@ async def _record(
     if not await allow(request.app.state.redis, f"ping:{ping_key}", settings.ping_rate_limit):
         return PlainTextResponse("rate limited", status_code=429, headers={"Retry-After": "60"})
 
-    body = await _body_tail(request, settings.output_tail_bytes)
+    # One byte more than an evaluation report may be, so an oversized one is
+    # noticed instead of silently cut. Jobs' output is trimmed to its tail later.
+    body = await _body_tail(
+        request, max(settings.output_tail_bytes, settings.eval_report_max_bytes + 1)
+    )
     source_ip = request.client.host if request.client else None
     outcome = await record_ping(
         session,
@@ -66,6 +70,7 @@ async def _record(
         source_ip,
         datetime.now(UTC),
         settings.output_tail_bytes,
+        settings.eval_report_max_bytes,
     )
     if outcome is None:
         return PlainTextResponse("not found", status_code=404)
@@ -73,6 +78,8 @@ async def _record(
     PINGS.labels(kind=parsed.kind).inc()
     await dispatch_pending(session, request.app.state.dispatcher)
     await publish(request.app.state.redis, check_updated(outcome.check))
+    if outcome.rejected is not None:
+        return PlainTextResponse(outcome.rejected, status_code=422)
     return PlainTextResponse("OK")
 
 

@@ -9,6 +9,7 @@ from sqlalchemy import (
     BigInteger,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Identity,
     Index,
@@ -151,6 +152,39 @@ class Run(Base):
     duration_ms: Mapped[int | None]
     exit_code: Mapped[int | None]
     output_tail: Mapped[str | None] = mapped_column(Text)
+
+
+class EvalReport(Base):
+    __tablename__ = "eval_reports"
+    __table_args__ = (Index("ix_eval_reports_check_id_id", "check_id", "id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    check_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("checks.id", ondelete="CASCADE"))
+    run_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("runs.id", ondelete="CASCADE"))
+    suite: Mapped[str] = mapped_column(String(200))
+    labels: Mapped[dict[str, Any]] = mapped_column(server_default=text("'{}'::jsonb"))
+    report_url: Mapped[str | None] = mapped_column(String(2000))
+    # The report exactly as it was sent, so fields tocsin doesn't know yet
+    # aren't lost.
+    raw: Mapped[dict[str, Any]]
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class EvalScenario(Base):
+    __tablename__ = "eval_scenarios"
+    __table_args__ = (UniqueConstraint("report_id", "name"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    report_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("eval_reports.id", ondelete="CASCADE")
+    )
+    name: Mapped[str] = mapped_column(String(200))
+    # Counts, not a percentage, so the statistics can be done here.
+    runs: Mapped[int]
+    passes: Mapped[int]
+    # Percentiles by name ("p50", "p95", …), in milliseconds.
+    latency_ms: Mapped[dict[str, Any] | None]
+    cost_usd: Mapped[float | None] = mapped_column(Float)
 
 
 class Event(Base):

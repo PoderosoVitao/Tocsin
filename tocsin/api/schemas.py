@@ -7,6 +7,7 @@ from typing import Any, Self
 from pydantic import BaseModel, Field, model_validator
 
 from tocsin.channels import validate_config
+from tocsin.evalstats import wilson_interval
 from tocsin.models import (
     ApiKey,
     Channel,
@@ -15,6 +16,8 @@ from tocsin.models import (
     CheckKind,
     Delivery,
     DeliveryStatus,
+    EvalReport,
+    EvalScenario,
     Event,
     Run,
     RunStatus,
@@ -309,3 +312,51 @@ class KeyOut(BaseModel):
 # The response to creating a key: the only time the key itself is shown.
 class KeyCreated(KeyOut):
     key: str
+
+
+class ScenarioOut(BaseModel):
+    name: str
+    runs: int
+    passes: int
+    pass_rate: float
+    # The 95% Wilson interval for the pass rate.
+    low: float
+    high: float
+    latency_ms: dict[str, float] | None
+    cost_usd: float | None
+
+    @classmethod
+    def build(cls, scenario: EvalScenario) -> ScenarioOut:
+        low, high = wilson_interval(scenario.passes, scenario.runs)
+        return cls(
+            name=scenario.name,
+            runs=scenario.runs,
+            passes=scenario.passes,
+            pass_rate=scenario.passes / scenario.runs,
+            low=low,
+            high=high,
+            latency_ms=scenario.latency_ms,
+            cost_usd=scenario.cost_usd,
+        )
+
+
+class EvalReportOut(BaseModel):
+    id: int
+    run_id: int
+    received_at: datetime
+    suite: str
+    labels: dict[str, str]
+    report_url: str | None
+    scenarios: list[ScenarioOut]
+
+    @classmethod
+    def build(cls, report: EvalReport, scenarios: list[EvalScenario]) -> EvalReportOut:
+        return cls(
+            id=report.id,
+            run_id=report.run_id,
+            received_at=report.created_at,
+            suite=report.suite,
+            labels=report.labels,
+            report_url=report.report_url,
+            scenarios=[ScenarioOut.build(scenario) for scenario in scenarios],
+        )

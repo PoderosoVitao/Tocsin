@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     # How much of a job's output (the body of a finish ping) to keep per run.
     # The end of the output is kept, since that is where errors are.
     output_tail_bytes: int = 10_000
+    # The largest evaluation report an eval check accepts. A report is read
+    # whole, since a cut-off JSON document is useless.
+    eval_report_max_bytes: int = 1_000_000
 
     # Pings accepted per check per minute. A job sending start and finish
     # pings every minute uses two.

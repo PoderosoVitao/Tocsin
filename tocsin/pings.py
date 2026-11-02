@@ -3,12 +3,25 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tocsin.evalreport import Report, ReportError, parse_report
 from tocsin.humanize import duration
-from tocsin.models import Check, Event, Ping, PingKind, Run, RunStatus, State
+from tocsin.models import (
+    Check,
+    CheckKind,
+    EvalReport,
+    EvalScenario,
+    Event,
+    Ping,
+    PingKind,
+    Run,
+    RunStatus,
+    State,
+)
 from tocsin.transitions import schedule_next, transition
 
 
@@ -35,6 +48,9 @@ class Signal:
 class PingOutcome:
     check: Check
     events: list[Event] = field(default_factory=list)
+    # Set when an eval check's success ping carried no usable report. The ping
+    # is recorded, as a failed run, and the sender is told why.
+    rejected: str | None = None
 
 
 # Keeps the last `limit` bytes of a job's output as text. Postgres text can't
@@ -65,6 +81,32 @@ async def _open_run(session: AsyncSession, check: Check) -> Run | None:
     )
 
 
+async def _store_report(
+    session: AsyncSession, check: Check, run: Run, report: Report, raw: dict[str, Any]
+) -> None:
+    stored = EvalReport(
+        check_id=check.id,
+        run_id=run.id,
+        suite=report.suite,
+        labels=report.labels,
+        report_url=report.report_url,
+        raw=raw,
+    )
+    session.add(stored)
+    await session.flush()
+    session.add_all(
+        EvalScenario(
+            report_id=stored.id,
+            name=scenario.name,
+            runs=scenario.runs,
+            passes=scenario.passes,
+            latency_ms=scenario.latency_ms,
+            cost_usd=scenario.cost_usd.total if scenario.cost_usd else None,
+        )
+        for scenario in report.scenarios
+    )
+
+
 def _too_long(check: Check, run: Run) -> bool:
     limit = check.max_duration_seconds
     return limit is not None and run.duration_ms is not None and run.duration_ms > limit * 1000
@@ -79,6 +121,11 @@ def _too_long(check: Check, run: Run) -> bool:
 # serialises pings with the sweep, so a success ping and an overdue sweep for
 # the same check can't both act on a stale state.
 #
+# An eval check's success ping must carry an evaluation report (see
+# tocsin.evalreport): "it ran" is not enough for those. A body that is missing
+# or unusable makes the run a failure, saying why, so a job whose reports have
+# silently stopped being readable can't pass for a healthy one.
+#
 # A start ping opens a run and a finish ping closes it, giving it a duration.
 # One run is tracked at a time: a second start before a finish marks the first
 # run unfinished. A finish with no start makes a run without a duration.
@@ -90,6 +137,7 @@ async def record_ping(
     source_ip: str | None,
     now: datetime,
     tail_limit: int,
+    report_limit: int = 1_000_000,
 ) -> PingOutcome | None:
     check = await session.scalar(select(Check).where(Check.ping_key == ping_key).with_for_update())
     if check is None:
@@ -123,16 +171,29 @@ async def record_ping(
             outcome.events.append(await transition(session, check, State.UP, "first ping", now))
         return outcome
 
+    report: tuple[Report, dict[str, Any]] | None = None
+    if check.kind == CheckKind.EVAL and signal.kind == PingKind.SUCCESS:
+        try:
+            report = parse_report(body, report_limit)
+        except ReportError as exc:
+            outcome.rejected = str(exc)
+
     run = open_run or Run(check_id=check.id)
-    run.status = RunStatus.SUCCESS if signal.kind == PingKind.SUCCESS else RunStatus.FAIL
+    succeeded = signal.kind == PingKind.SUCCESS and outcome.rejected is None
+    run.status = RunStatus.SUCCESS if succeeded else RunStatus.FAIL
     run.finished_at = now
     run.exit_code = signal.exit_code
-    run.output_tail = output_tail(body, tail_limit)
+    if report is not None:
+        run.output_tail = report[0].summary()
+    else:
+        run.output_tail = outcome.rejected or output_tail(body, tail_limit)
     if run.started_at is not None:
         run.duration_ms = int((now - run.started_at).total_seconds() * 1000)
     check.last_start_at = None
     session.add(run)
     await session.flush()
+    if report is not None:
+        await _store_report(session, check, run, *report)
 
     # A paused check keeps its history but never changes state, so a job that
     # keeps running while paused can't raise an alert.
@@ -142,9 +203,11 @@ async def record_ping(
     schedule_next(check, now)
     # A run that succeeded but took longer than the maximum counts as a failure
     # too: it's the same problem the sweep reports while the run is going.
-    failed = signal.kind == PingKind.FAIL or _too_long(check, run)
+    failed = not succeeded or _too_long(check, run)
     if failed and check.state != State.DOWN:
-        if signal.kind == PingKind.FAIL:
+        if outcome.rejected is not None:
+            reason = outcome.rejected
+        elif signal.kind == PingKind.FAIL:
             reason = _failure_reason(signal)
         else:
             reason = (

@@ -4,10 +4,9 @@ Your cron jobs tell tocsin "I ran". Tocsin tells you when one of them didn't, an
 jobs, when the numbers got worse.
 
 > **Status: work in progress.** The core works and is tested: tocsin notices when a job misses
-> its schedule, fails or runs too long, and sends exactly one Telegram alert for it, and a first
-> dashboard shows and manages everything. Evaluation checks and failure summaries are still to
-> come (see the
-> [roadmap](#roadmap)).
+> its schedule, fails or runs too long, and sends exactly one Telegram alert for it, and a
+> dashboard shows and manages everything. Evaluation checks store their reports, but don't alert on
+> the numbers yet, and failure summaries are still to come (see the [roadmap](#roadmap)).
 
 ## Why another job monitor
 
@@ -121,6 +120,30 @@ still runs, a warning goes to stderr, and the command's own exit code is returne
   held back by the cooldown are marked `suppressed`. `GET /api/alerts` is the same deliveries across
   every check, filterable with `?status=failed`. The stream also announces `alert.updated` when a
   worker sends, retries or gives up on a delivery, so retries show on the dashboard as they happen.
+- **Evaluation reports.** A check created with `"kind": "eval"` expects a JSON report in the body of
+  its success ping, in the vendor-neutral `tocsin.eval/v1` schema, and stores the counts for each
+  scenario (not just a percentage, so tocsin can do its own statistics):
+
+  ```
+  {
+    "schema": "tocsin.eval/v1",
+    "suite": "refund-agent",
+    "labels": {"model": "…", "prompt_version": "…", "git_sha": "…"},
+    "scenarios": [
+      {"name": "refund_tool_never_called", "runs": 50, "passes": 47,
+       "latency_ms": {"p50": 820, "p95": 2400}, "cost_usd": {"total": 1.84}}
+    ],
+    "report_url": "https://ci.example.com/runs/812"
+  }
+  ```
+
+  `latency_ms`, `cost_usd`, `labels` and `report_url` are optional, and fields tocsin doesn't know
+  are kept in the stored report and otherwise ignored. A success ping with no report, or one that
+  can't be read (bad JSON, `passes` above `runs`, a duplicate scenario name, over 1 MB), is
+  recorded as a failed run: the sender gets a `422` saying why, and the alert says it too. A job
+  whose reports have stopped being readable can't look healthy. Start and fail pings need no
+  report. `GET /api/checks/<id>/eval` lists the reports, newest first, with each scenario's pass
+  rate and 95% Wilson interval.
 - **Rate limiting** per check in Redis (60 pings a minute by default). If Redis is down, pings are
   still accepted.
 - **Operations:** `/healthz`, and Prometheus metrics on `/metrics`, including
@@ -227,7 +250,8 @@ with nothing retrying it); and the API's health endpoint, when `TOCSIN_SELF_CHEC
 | 2. Usable | Start/finish runs and durations, CLI wrapper, flapping rules, self-monitoring | Done |
 | 3. Dashboard | Overview with live updates, check page, alert log, settings | Done |
 | 4. Eval checks | Statistics: Wilson intervals, regression test against a baseline | Done |
-| | Result schema, alert rules, eval page, JUnit and Stochast adapters | Next |
+| | Result schema, storage and `GET /api/checks/<id>/eval` | Done |
+| | Alert rules (floor, regression, not enough data, budget), eval page, JUnit and Stochast adapters | Next |
 | 5. Summaries | Redaction, LLM summaries (Claude, OpenAI and others), evaluation of the summariser | Planned |
 
 ## Development
