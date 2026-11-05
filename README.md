@@ -5,8 +5,9 @@ jobs, when the numbers got worse.
 
 > **Status: work in progress.** The core works and is tested: tocsin notices when a job misses
 > its schedule, fails or runs too long, and sends exactly one Telegram alert for it, and a
-> dashboard shows and manages everything. Evaluation checks store their reports, but don't alert on
-> the numbers yet, and failure summaries are still to come (see the [roadmap](#roadmap)).
+> dashboard shows and manages everything. Evaluation checks alert on their numbers. An eval page,
+> adapters for other tools and failure summaries are still to come (see the
+> [roadmap](#roadmap)).
 
 ## Why another job monitor
 
@@ -143,7 +144,26 @@ still runs, a warning goes to stderr, and the command's own exit code is returne
   recorded as a failed run: the sender gets a `422` saying why, and the alert says it too. A job
   whose reports have stopped being readable can't look healthy. Start and fail pings need no
   report. `GET /api/checks/<id>/eval` lists the reports, newest first, with each scenario's pass
-  rate and 95% Wilson interval.
+  rate and 95% Wilson interval, the verdict and what the rules found.
+- **Evaluation rules.** Each report is checked against the rules in the check's `eval_rules`
+  (set when creating the check or with `PATCH`, which replaces them as a whole):
+
+  | Rule | Fails the report when |
+  |---|---|
+  | `floor` | the upper end of a scenario's 95% interval is below it: under the bar even on the generous reading |
+  | regression (on by default) | a scenario's pass rate fell against the baseline by at least `min_drop` (default 5 points) and the drop is statistically clear (one-sided Fisher exact test, `alpha` 0.05) |
+  | `max_latency_ms` | a latency percentile in a scenario is over its limit, such as `{"p95": 3000}` |
+  | `max_cost_usd` | the report's total cost is over the limit |
+
+  The baseline is the previous `baseline_reports` reports (default 5) pooled, or one report pinned
+  with `baseline_report_id`. Reports that failed are left out of the pool, so a regression that
+  lasts doesn't become the new normal and quietly end the alert.
+
+  A failing report takes the check down and sends the usual alert, with what was found. A drop
+  that looks real but is too small a sample to call is **not enough data**: not an alert, but
+  stored with the report and its findings, with about how many more runs would settle it. It isn't
+  a recovery either: a check that is down stays down until a report is clearly fine. A missed run
+  is the ordinary dead man's switch. A good report brings the check back up.
 - **Rate limiting** per check in Redis (60 pings a minute by default). If Redis is down, pings are
   still accepted.
 - **Operations:** `/healthz`, and Prometheus metrics on `/metrics`, including
@@ -251,7 +271,8 @@ with nothing retrying it); and the API's health endpoint, when `TOCSIN_SELF_CHEC
 | 3. Dashboard | Overview with live updates, check page, alert log, settings | Done |
 | 4. Eval checks | Statistics: Wilson intervals, regression test against a baseline | Done |
 | | Result schema, storage and `GET /api/checks/<id>/eval` | Done |
-| | Alert rules (floor, regression, not enough data, budget), eval page, JUnit and Stochast adapters | Next |
+| | Alert rules: floor, regression, not enough data, budget | Done |
+| | Eval page, JUnit and Stochast adapters | Next |
 | 5. Summaries | Redaction, LLM summaries (Claude, OpenAI and others), evaluation of the summariser | Planned |
 
 ## Development

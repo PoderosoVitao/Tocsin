@@ -9,6 +9,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tocsin.evalreport import Report, ReportError, parse_report
+from tocsin.evaluation import (
+    EvalRules,
+    Evaluation,
+    ScenarioResult,
+    Verdict,
+    evaluate,
+    load_baselines,
+)
 from tocsin.humanize import duration
 from tocsin.models import (
     Check,
@@ -81,9 +89,10 @@ async def _open_run(session: AsyncSession, check: Check) -> Run | None:
     )
 
 
+# Stores the report and applies the check's rules to it.
 async def _store_report(
     session: AsyncSession, check: Check, run: Run, report: Report, raw: dict[str, Any]
-) -> None:
+) -> Evaluation:
     stored = EvalReport(
         check_id=check.id,
         run_id=run.id,
@@ -105,6 +114,26 @@ async def _store_report(
         )
         for scenario in report.scenarios
     )
+
+    rules = EvalRules.model_validate(check.eval_rules)
+    baselines = await load_baselines(session, check.id, stored.id, rules)
+    evaluation = evaluate(
+        rules,
+        [
+            ScenarioResult(
+                scenario.name,
+                scenario.runs,
+                scenario.passes,
+                scenario.latency_ms,
+                scenario.cost_usd.total if scenario.cost_usd else None,
+            )
+            for scenario in report.scenarios
+        ],
+        baselines,
+    )
+    stored.verdict = evaluation.verdict
+    stored.findings = [finding.as_json() for finding in evaluation.findings]
+    return evaluation
 
 
 def _too_long(check: Check, run: Run) -> bool:
@@ -192,8 +221,7 @@ async def record_ping(
     check.last_start_at = None
     session.add(run)
     await session.flush()
-    if report is not None:
-        await _store_report(session, check, run, *report)
+    evaluation = await _store_report(session, check, run, *report) if report else None
 
     # A paused check keeps its history but never changes state, so a job that
     # keeps running while paused can't raise an alert.
@@ -203,19 +231,25 @@ async def record_ping(
     schedule_next(check, now)
     # A run that succeeded but took longer than the maximum counts as a failure
     # too: it's the same problem the sweep reports while the run is going.
-    failed = not succeeded or _too_long(check, run)
+    # A drop that might be real isn't an alert, but it isn't a recovery either:
+    # a check that is down stays down until a report is clearly fine.
+    unsettled = evaluation is not None and evaluation.verdict == Verdict.NEEDS_DATA
+    broken = evaluation is not None and evaluation.verdict == Verdict.FAILING
+    failed = not succeeded or broken or _too_long(check, run)
     if failed and check.state != State.DOWN:
         if outcome.rejected is not None:
             reason = outcome.rejected
         elif signal.kind == PingKind.FAIL:
             reason = _failure_reason(signal)
+        elif evaluation is not None and broken:
+            reason = evaluation.reason()
         else:
             reason = (
                 f"the run took {duration(timedelta(milliseconds=run.duration_ms or 0))}, "
                 f"longer than the {duration(check.max_duration_seconds or 0)} maximum"
             )
         outcome.events.append(await transition(session, check, State.DOWN, reason, now, run.id))
-    elif not failed and check.state != State.UP:
+    elif not failed and check.state != State.UP and not unsettled:
         reason = "first ping" if check.state == State.NEW else "the job succeeded"
         outcome.events.append(await transition(session, check, State.UP, reason, now, run.id))
     return outcome

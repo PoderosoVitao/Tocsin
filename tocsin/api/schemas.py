@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from tocsin.channels import validate_config
 from tocsin.evalstats import wilson_interval
+from tocsin.evaluation import EvalRules
 from tocsin.models import (
     ApiKey,
     Channel,
@@ -45,6 +46,8 @@ class CheckIn(BaseModel):
     cooldown_seconds: int = Field(default=300, ge=0, le=MAX_COOLDOWN_SECONDS)
     # Repeat the alert this often while the check stays down. Off when left out.
     reminder_seconds: int | None = Field(default=None, ge=60, le=MAX_REMINDER_SECONDS)
+    # What an eval check alerts on. Only for kind "eval".
+    eval_rules: EvalRules | None = None
     # The channels to alert. Left out, a new check alerts every channel, which
     # is what a single user with one Telegram chat wants.
     channel_ids: list[uuid.UUID] | None = None
@@ -57,6 +60,14 @@ class CheckIn(BaseModel):
             raise ValueError(str(exc)) from exc
         return self
 
+    @model_validator(mode="after")
+    def _rules_are_for_eval_checks(self) -> Self:
+        if self.eval_rules is not None and self.kind != CheckKind.EVAL:
+            raise ValueError("eval_rules only apply to a check of kind eval")
+        if self.eval_rules is not None and self.eval_rules.baseline_report_id is not None:
+            raise ValueError("a report can only be pinned as the baseline once it exists")
+        return self
+
 
 class CheckPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
@@ -66,6 +77,7 @@ class CheckPatch(BaseModel):
     max_duration_seconds: int | None = Field(default=None, ge=1, le=MAX_DURATION_SECONDS)
     cooldown_seconds: int | None = Field(default=None, ge=0, le=MAX_COOLDOWN_SECONDS)
     reminder_seconds: int | None = Field(default=None, ge=60, le=MAX_REMINDER_SECONDS)
+    eval_rules: EvalRules | None = None
     channel_ids: list[uuid.UUID] | None = None
     paused: bool | None = None
 
@@ -80,6 +92,8 @@ class CheckOut(BaseModel):
     max_duration_seconds: int | None
     cooldown_seconds: int
     reminder_seconds: int | None
+    # Set for eval checks: every rule, with defaults filled in.
+    eval_rules: EvalRules | None
     state: State
     due_at: datetime | None
     next_expected_at: datetime | None
@@ -103,6 +117,9 @@ class CheckOut(BaseModel):
             max_duration_seconds=check.max_duration_seconds,
             cooldown_seconds=check.cooldown_seconds,
             reminder_seconds=check.reminder_seconds,
+            eval_rules=(
+                EvalRules.model_validate(check.eval_rules) if check.kind == CheckKind.EVAL else None
+            ),
             state=displayed_state(check, now),
             due_at=check.due_at,
             next_expected_at=check.next_expected_at,
@@ -347,6 +364,9 @@ class EvalReportOut(BaseModel):
     suite: str
     labels: dict[str, str]
     report_url: str | None
+    # "ok", "failing" or "needs_data", and what the check's rules found.
+    verdict: str
+    findings: list[dict[str, Any]]
     scenarios: list[ScenarioOut]
 
     @classmethod
@@ -358,5 +378,7 @@ class EvalReportOut(BaseModel):
             suite=report.suite,
             labels=report.labels,
             report_url=report.report_url,
+            verdict=report.verdict,
+            findings=report.findings,
             scenarios=[ScenarioOut.build(scenario) for scenario in scenarios],
         )

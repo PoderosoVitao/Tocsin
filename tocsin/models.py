@@ -41,6 +41,7 @@ class Base(DeclarativeBase):
     type_annotation_map = {
         datetime: DateTime(timezone=True),
         dict[str, Any]: JSONB,
+        list[dict[str, Any]]: JSONB,
     }
 
 
@@ -113,6 +114,11 @@ class Check(Base):
     cooldown_seconds: Mapped[int] = mapped_column(default=300, server_default=text("300"))
     # Repeat the alert this often while the check stays down; None for never.
     reminder_seconds: Mapped[int | None]
+    # What an eval check alerts on (see tocsin.evaluation.EvalRules). Only
+    # what was set; the rest takes the defaults.
+    eval_rules: Mapped[dict[str, Any]] = mapped_column(
+        default=dict, server_default=text("'{}'::jsonb")
+    )
     state: Mapped[str] = mapped_column(String(16), default=State.NEW)
     # When the next ping is due according to the schedule, and that time plus
     # the grace period. The sweep only looks at the second one.
@@ -167,6 +173,12 @@ class EvalReport(Base):
     # The report exactly as it was sent, so fields tocsin doesn't know yet
     # aren't lost.
     raw: Mapped[dict[str, Any]]
+    # What the check's rules made of it: "ok", "failing" or "needs_data", and
+    # the findings behind that.
+    verdict: Mapped[str] = mapped_column(String(16), default="ok", server_default="ok")
+    findings: Mapped[list[dict[str, Any]]] = mapped_column(
+        default=list, server_default=text("'[]'::jsonb")
+    )
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 

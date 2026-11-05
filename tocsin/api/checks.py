@@ -9,8 +9,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tocsin.api.deps import AppSettings, Session
 from tocsin.api.schemas import CheckIn, CheckOut, CheckPatch, DeliveryOut, EventOut, RunOut
+from tocsin.evaluation import EvalRules
 from tocsin.events import check_deleted, check_updated, publish
-from tocsin.models import Channel, Check, Delivery, Event, Run, State, check_channels
+from tocsin.models import (
+    Channel,
+    Check,
+    CheckKind,
+    Delivery,
+    EvalReport,
+    Event,
+    Run,
+    State,
+    check_channels,
+)
 from tocsin.schedule import ScheduleError, validate
 from tocsin.transitions import clear_schedule, schedule_next, transition
 
@@ -62,6 +73,25 @@ async def _assign_channels(
     return wanted
 
 
+async def _check_rules(session: AsyncSession, check: Check, rules: EvalRules) -> None:
+    if check.kind != CheckKind.EVAL:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="eval_rules only apply to a check of kind eval",
+        )
+    if rules.baseline_report_id is not None:
+        pinned = await session.scalar(
+            select(EvalReport.id).where(
+                EvalReport.id == rules.baseline_report_id, EvalReport.check_id == check.id
+            )
+        )
+        if pinned is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"this check has no report {rules.baseline_report_id} to use as a baseline",
+            )
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_check(
     body: CheckIn, request: Request, session: Session, settings: AppSettings
@@ -75,6 +105,7 @@ async def create_check(
         max_duration_seconds=body.max_duration_seconds,
         cooldown_seconds=body.cooldown_seconds,
         reminder_seconds=body.reminder_seconds,
+        eval_rules=body.eval_rules.model_dump(exclude_unset=True) if body.eval_rules else {},
     )
     session.add(check)
     await session.flush()
@@ -108,7 +139,11 @@ async def update_check(
 ) -> CheckOut:
     now = datetime.now(UTC)
     check = await get_check(session, check_id, lock=True)
-    changes = body.model_dump(exclude_unset=True, exclude={"paused", "channel_ids"})
+    changes = body.model_dump(exclude_unset=True, exclude={"paused", "channel_ids", "eval_rules"})
+    if body.eval_rules is not None:
+        await _check_rules(session, check, body.eval_rules)
+        # Replaces the rules as a whole, keeping only what was set.
+        check.eval_rules = body.eval_rules.model_dump(exclude_unset=True)
 
     schedule = changes.get("schedule", check.schedule)
     timezone = changes.get("timezone", check.timezone)
