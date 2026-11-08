@@ -249,3 +249,167 @@ export function describeChannel(channel) {
   if (channel.config.bot_token) parts.push(`bot ${channel.config.bot_token}`);
   return parts.join(" · ");
 }
+
+// ---- Evaluation checks ----
+
+export const VERDICT_LABELS = { ok: "Within the rules", failing: "Failing", needs_data: "Not enough data" };
+
+// 0.9333 -> "93.3%", 1 -> "100%".
+export function percent(rate) {
+  return `${(rate * 100).toFixed(1).replace(/\.0$/, "")}%`;
+}
+
+export function formatCost(usd) {
+  if (usd === null || usd === undefined) return "no cost";
+  return usd !== 0 && usd < 0.01 ? `$${usd.toPrecision(2)}` : `$${usd.toFixed(2)}`;
+}
+
+// "p50 820ms · p95 2s", the percentiles in numeric order.
+export function formatLatency(latency) {
+  const entries = Object.entries(latency ?? {}).sort((a, b) => parseFloat(a[0].slice(1)) - parseFloat(b[0].slice(1)));
+  if (entries.length === 0) return "no latency";
+  return entries.map(([name, ms]) => `${name} ${formatDuration(ms)}`).join(" · ");
+}
+
+// What changed in the labels from one report to the next, as
+// [{ key, from, to }]. A label that appeared or disappeared shows as "none".
+export function labelDiff(before, after) {
+  const changes = [];
+  for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (before[key] !== after[key]) changes.push({ key, from: before[key] ?? "none", to: after[key] ?? "none" });
+  }
+  return changes.sort((a, b) => a.key.localeCompare(b.key));
+}
+
+export function describeLabelChanges(changes) {
+  return changes.map((change) => `${change.key} ${change.from} → ${change.to}`).join("; ");
+}
+
+// For reports oldest first: the label changes at each report that has any,
+// as [{ index, changes }]. The first report has nothing to be compared to.
+export function labelChanges(reports) {
+  const found = [];
+  for (let index = 1; index < reports.length; index++) {
+    const changes = labelDiff(reports[index - 1].labels, reports[index].labels);
+    if (changes.length) found.push({ index, changes });
+  }
+  return found;
+}
+
+// Scenario names in order of first appearance, with those that have a finding
+// in the newest report first, since those are why someone is looking.
+export function scenarioNames(reportsOldestFirst) {
+  const names = [];
+  for (const report of reportsOldestFirst) {
+    for (const scenario of report.scenarios) if (!names.includes(scenario.name)) names.push(scenario.name);
+  }
+  const newest = reportsOldestFirst.at(-1);
+  const flagged = new Set((newest?.findings ?? []).map((finding) => finding.scenario).filter(Boolean));
+  return [...names.filter((name) => flagged.has(name)), ...names.filter((name) => !flagged.has(name))];
+}
+
+// The counts a scenario in report `index` is compared against, worked out the
+// way the server does: the pinned report, or the previous `baseline_reports`
+// reports pooled, leaving out those that failed. Null when there is nothing.
+export function baselineCounts(reportsOldestFirst, index, rules, name) {
+  let pool;
+  if (rules.baseline_report_id !== null && rules.baseline_report_id !== undefined) {
+    pool = reportsOldestFirst.filter((report) => report.id === rules.baseline_report_id);
+  } else {
+    pool = reportsOldestFirst
+      .slice(0, index)
+      .filter((report) => report.verdict !== "failing")
+      .slice(-rules.baseline_reports);
+  }
+  let passes = 0;
+  let runs = 0;
+  for (const report of pool) {
+    const scenario = report.scenarios.find((item) => item.name === name);
+    if (scenario) {
+      passes += scenario.passes;
+      runs += scenario.runs;
+    }
+  }
+  return runs ? { passes, runs, rate: passes / runs } : null;
+}
+
+// One scenario's history, oldest first, with its baseline at each report.
+export function scenarioSeries(reportsOldestFirst, name, rules) {
+  const points = [];
+  reportsOldestFirst.forEach((report, index) => {
+    const scenario = report.scenarios.find((item) => item.name === name);
+    if (!scenario) return;
+    points.push({
+      index,
+      report,
+      scenario,
+      baseline: baselineCounts(reportsOldestFirst, index, rules, name),
+    });
+  });
+  return points;
+}
+
+// Where everything goes in a chart of pass rate over time, in the SVG's own
+// units, so drawing it is only a matter of copying these numbers. Reports are
+// spaced evenly, not by time: nightly reports are close to evenly spaced
+// anyway, and a gap of a week would otherwise squeeze the rest together.
+//
+// The vertical axis runs from just under the lowest value to 100%, since pass
+// rates of interest live near the top and a 0-100% axis would flatten them.
+export function chartLayout(points, reportCount, width, height, margin = { top: 10, right: 12, bottom: 8, left: 40 }) {
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  const lows = points.flatMap((point) => [point.scenario.low, point.baseline?.rate ?? 1]);
+  // Gridlines fall on round percentages: every 5 points on a tight range, 10 on
+  // a middling one, 25 on a wide one.
+  const wanted = 1 - (Math.min(...lows, 1) - 0.03);
+  const step = wanted <= 0.2 ? 0.05 : wanted <= 0.5 ? 0.1 : 0.25;
+  const yMin = Math.max(0, Math.round((Math.floor((1 - wanted) / step + 1e-9) * step) * 100) / 100);
+
+  const x = (index) => margin.left + (reportCount <= 1 ? plotWidth / 2 : (index / (reportCount - 1)) * plotWidth);
+  const y = (rate) => margin.top + (1 - (rate - yMin) / (1 - yMin)) * plotHeight;
+  const round = (value) => Math.round(value * 10) / 10;
+  const line = (items) => items.map((item, i) => `${i ? "L" : "M"}${round(item.x)} ${round(item.y)}`).join(" ");
+
+  const dots = points.map((point) => ({
+    point,
+    x: round(x(point.index)),
+    y: round(y(point.scenario.pass_rate)),
+    shape: point.report.verdict === "failing" ? "diamond" : point.report.verdict === "needs_data" ? "ring" : "circle",
+  }));
+  const highs = points.map((point) => ({ x: x(point.index), y: y(point.scenario.high) }));
+  const lowsLine = points.map((point) => ({ x: x(point.index), y: y(point.scenario.low) })).reverse();
+
+  // The baseline is drawn in runs of consecutive points that have one.
+  const baselineRuns = [];
+  let current = [];
+  for (const point of points) {
+    if (point.baseline) current.push({ x: x(point.index), y: y(point.baseline.rate) });
+    else if (current.length) {
+      baselineRuns.push(current);
+      current = [];
+    }
+  }
+  if (current.length) baselineRuns.push(current);
+
+  const ticks = [];
+  for (let rate = yMin; rate < 1 - 1e-9; rate += step) ticks.push({ y: round(y(rate)), label: percent(rate) });
+  ticks.push({ y: round(y(1)), label: "100%" });
+  return {
+    width,
+    height,
+    left: margin.left,
+    right: width - margin.right,
+    ticks,
+    dots,
+    line: dots.length ? line(dots) : "",
+    band: dots.length ? `${line([...highs, ...lowsLine])} Z` : "",
+    baseline: baselineRuns.map(line).join(" "),
+    x: (index) => round(x(index)),
+  };
+}
+
+// A report link is shown only if it is a web link; the server checks this too.
+export function safeLink(url) {
+  return typeof url === "string" && /^https?:\/\//i.test(url) ? url : null;
+}

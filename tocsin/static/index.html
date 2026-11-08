@@ -77,6 +77,24 @@
       </header>
       <dl id="detail-facts" class="facts"></dl>
     </section>
+    <section id="eval-panel" class="panel" hidden>
+      <header class="detail-head">
+        <h2 class="panel-title">Evaluation</h2>
+        <span id="eval-verdict"></span>
+      </header>
+      <ul id="eval-findings" class="findings"></ul>
+      <p id="eval-empty" class="hint" hidden>
+        No reports yet. This check expects a <code>tocsin.eval/v1</code> report in the body of its success ping.
+      </p>
+      <div id="eval-scenarios" class="scenarios"></div>
+      <button type="button" id="more-scenarios" class="btn ghost" hidden>Show all scenarios</button>
+      <div id="eval-changes-box" hidden>
+        <h3 class="subhead">What changed</h3>
+        <ul id="eval-changes" class="rows"></ul>
+      </div>
+      <h3 class="subhead">Reports</h3>
+      <ul id="eval-reports" class="rows"></ul>
+    </section>
     <section class="panel">
       <h2 class="panel-title">Runs</h2>
       <div id="run-bars" class="bars" role="img"></div>

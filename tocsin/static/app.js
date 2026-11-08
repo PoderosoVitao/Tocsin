@@ -5,19 +5,30 @@ import {
   checkToForm,
   countByState,
   describeChannel,
+  VERDICT_LABELS,
+  chartLayout,
   describeDelivery,
+  describeLabelChanges,
   describeRuns,
   describeTransition,
   durationBars,
   errorMessage,
   formToCheckBody,
+  formatCost,
   formatDuration,
+  formatLatency,
   formatSpan,
+  labelChanges,
   mergeNewest,
   nextExpected,
   parseRoute,
   parseSse,
+  percent,
+  plural,
   relativeTime,
+  safeLink,
+  scenarioNames,
+  scenarioSeries,
   shouldRefresh,
   sortChecks,
 } from "/static/logic.js";
@@ -37,7 +48,8 @@ const $ = (id) => document.getElementById(id);
 let apiKey = readStorage(KEY_STORAGE);
 let route = parseRoute(location.hash);
 let checks = [];
-let detail = null; // { check, runs, events, moreRuns, moreEvents } for the open check page
+let detail = null; // { check, runs, events, reports, moreRuns, moreEvents } for the open check page
+let showAllScenarios = false;
 let alertLog = { status: "", items: [], more: false }; // the alert log page
 let settings = { checks: [], channels: [], keys: [] }; // the settings page
 let editing = null; // the check being edited in the dialog, or null for a new one
@@ -223,6 +235,150 @@ function renderDetail() {
   $("event-list").replaceChildren(...events.map(eventRow));
   $("events-empty").hidden = events.length > 0;
   $("more-events").hidden = !detail.moreEvents;
+  renderEval();
+}
+
+const SVG = "http://www.w3.org/2000/svg";
+const SCENARIOS_SHOWN = 6;
+const CHART_WIDTH = 480;
+const CHART_HEIGHT = 150;
+
+function svgNode(tag, attributes = {}, text) {
+  const node = document.createElementNS(SVG, tag);
+  for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, String(value));
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function verdictBadge(verdict) {
+  const badge = el("span", `badge verdict-${verdict}`);
+  badge.append(el("span", "", VERDICT_LABELS[verdict] ?? verdict));
+  return badge;
+}
+
+// Pass rate over time for one scenario: the line and its dots, the 95%
+// interval as a band, the baseline as a dashed line, and a dotted vertical
+// line wherever a label changed. Verdicts differ in shape as well as colour.
+function scenarioChart(name, points, reports, changes) {
+  const layout = chartLayout(points, reports.length, CHART_WIDTH, CHART_HEIGHT);
+  const last = points.at(-1).scenario;
+  const chart = svgNode("svg", { class: "chart", viewBox: `0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`, role: "img" });
+  chart.setAttribute(
+    "aria-label",
+    `${name}: pass rate over the last ${plural(points.length, "report")}, latest ${percent(last.pass_rate)}`,
+  );
+  for (const tick of layout.ticks) {
+    chart.append(svgNode("line", { class: "grid", x1: layout.left, x2: layout.right, y1: tick.y, y2: tick.y }));
+    chart.append(svgNode("text", { x: layout.left - 6, y: tick.y + 3, "text-anchor": "end" }, tick.label));
+  }
+  for (const change of changes) {
+    const x = (layout.x(change.index - 1) + layout.x(change.index)) / 2;
+    const marker = svgNode("line", { class: "marker", x1: x, x2: x, y1: 10, y2: CHART_HEIGHT - 8 });
+    marker.append(svgNode("title", {}, describeLabelChanges(change.changes)));
+    chart.append(marker);
+  }
+  chart.append(svgNode("path", { class: "band", d: layout.band }));
+  if (layout.baseline) chart.append(svgNode("path", { class: "baseline", d: layout.baseline }));
+  chart.append(svgNode("path", { class: "line", d: layout.line }));
+  for (const dot of layout.dots) {
+    const { scenario, report } = dot.point;
+    const kind = `dot-${report.verdict}`;
+    const r = 3.5;
+    const mark =
+      dot.shape === "diamond"
+        ? svgNode("path", { class: kind, d: `M${dot.x} ${dot.y - r - 1} l${r + 1} ${r + 1} l${-r - 1} ${r + 1} l${-r - 1} ${-r - 1} Z` })
+        : svgNode("circle", { class: kind, cx: dot.x, cy: dot.y, r });
+    const baseline = dot.point.baseline ? `, baseline ${percent(dot.point.baseline.rate)}` : "";
+    mark.append(
+      svgNode(
+        "title",
+        {},
+        `${when(report.received_at)}: ${scenario.passes}/${scenario.runs} (${percent(scenario.pass_rate)}), ` +
+          `95% interval ${percent(scenario.low)} to ${percent(scenario.high)}${baseline}`,
+      ),
+    );
+    chart.append(mark);
+  }
+  return chart;
+}
+
+function scenarioCard(name, reports, rules, changes) {
+  const points = scenarioSeries(reports, name, rules);
+  const latest = points.at(-1).scenario;
+  const card = el("div", "scenario");
+  const head = el("div", "scenario-head");
+  head.append(
+    el("span", "scenario-name", name),
+    el("span", "scenario-rate", `${percent(latest.pass_rate)} (${latest.passes}/${latest.runs})`),
+  );
+  card.append(head);
+  card.append(
+    el("div", "scenario-sub", `95% interval ${percent(latest.low)} to ${percent(latest.high)} · ${formatLatency(latest.latency_ms)} · ${formatCost(latest.cost_usd)}`),
+  );
+  card.append(scenarioChart(name, points, reports, changes));
+  return card;
+}
+
+function reportRow(report) {
+  const row = el("li", "row");
+  const main = el("div", "row-main");
+  main.append(verdictBadge(report.verdict), el("strong", "", report.suite));
+  const runs = report.scenarios.reduce((sum, item) => sum + item.runs, 0);
+  const passes = report.scenarios.reduce((sum, item) => sum + item.passes, 0);
+  main.append(el("span", "", `${passes}/${runs} passed in ${plural(report.scenarios.length, "scenario")}`));
+  const link = safeLink(report.report_url);
+  if (link) {
+    const anchor = el("a", "", "Full report");
+    anchor.href = link;
+    anchor.target = "_blank";
+    anchor.rel = "noopener noreferrer";
+    main.append(anchor);
+  }
+  const time = el("span", "row-time", when(report.received_at));
+  time.title = relativeTime(report.received_at);
+  main.append(time);
+  row.append(main);
+  const labels = Object.entries(report.labels);
+  if (labels.length) {
+    const list = el("div", "report-labels");
+    for (const [key, value] of labels) list.append(el("span", "tag", `${key}: ${value}`));
+    row.append(list);
+  }
+  return row;
+}
+
+function renderEval() {
+  const panel = $("eval-panel");
+  panel.hidden = detail?.check.kind !== "eval";
+  if (panel.hidden) return;
+  const { check } = detail;
+  const newestFirst = detail.reports;
+  const reports = [...newestFirst].reverse(); // oldest first, like the other charts
+  $("eval-empty").hidden = reports.length > 0;
+  $("eval-verdict").replaceChildren(...(reports.length ? [verdictBadge(newestFirst[0].verdict)] : []));
+  $("eval-findings").replaceChildren(
+    ...(newestFirst[0]?.findings ?? []).map((finding) => el("li", `finding ${finding.rule === "needs_data" ? "needs_data" : ""}`, finding.message)),
+  );
+
+  const names = scenarioNames(reports);
+  const shown = showAllScenarios ? names : names.slice(0, SCENARIOS_SHOWN);
+  const changes = labelChanges(reports);
+  $("eval-scenarios").replaceChildren(...shown.map((name) => scenarioCard(name, reports, check.eval_rules, changes)));
+  const more = $("more-scenarios");
+  more.hidden = names.length <= SCENARIOS_SHOWN;
+  more.textContent = showAllScenarios ? "Show fewer scenarios" : `Show all ${names.length} scenarios`;
+
+  $("eval-changes-box").hidden = changes.length === 0;
+  $("eval-changes").replaceChildren(
+    ...[...changes].reverse().map(({ index, changes: diff }) => {
+      const row = el("li", "row");
+      const main = el("div", "row-main");
+      main.append(el("strong", "", describeLabelChanges(diff)), el("span", "row-time", `at the report of ${when(reports[index].received_at)}`));
+      row.append(main);
+      return row;
+    }),
+  );
+  $("eval-reports").replaceChildren(...newestFirst.slice(0, 10).map(reportRow));
 }
 
 function show(view) {
@@ -297,6 +453,9 @@ async function refreshDetail() {
       api(`/api/checks/${id}/runs?limit=${PAGE_SIZE}`).then((r) => r.json()),
       api(`/api/checks/${id}/events?limit=${PAGE_SIZE}`).then((r) => r.json()),
     ]);
+    // Only eval checks have reports; the newest hundred are enough to chart.
+    const reports =
+      check.kind === "eval" ? await api(`/api/checks/${id}/eval?limit=100`).then((r) => r.json()) : [];
     if (route.id !== id) return; // the person moved on while this was loading
     const same = detail?.check.id === id;
     const mergedRuns = mergeNewest(same ? detail.runs : [], runs, PAGE_SIZE);
@@ -305,6 +464,7 @@ async function refreshDetail() {
       check,
       runs: mergedRuns.items,
       events: mergedEvents.items,
+      reports,
       // null means the older items already loaded keep the answer they had.
       moreRuns: mergedRuns.more ?? detail.moreRuns,
       moreEvents: mergedEvents.more ?? detail.moreEvents,
@@ -722,6 +882,7 @@ function showRoute() {
   route = parseRoute(location.hash);
   if (!apiKey) return show("login");
   detail = null;
+  showAllScenarios = false;
   $("new-key-notice").hidden = true;
   $("new-key-value").value = "";
   alertLog = { status: alertLog.status, items: [], more: false };
@@ -781,6 +942,10 @@ $("login-form").addEventListener("submit", async (event) => {
 });
 
 $("sign-out").addEventListener("click", () => signOut());
+$("more-scenarios").addEventListener("click", () => {
+  showAllScenarios = !showAllScenarios;
+  renderEval();
+});
 $("more-runs").addEventListener("click", () => loadMore("runs"));
 $("more-events").addEventListener("click", () => loadMore("events"));
 $("more-alerts").addEventListener("click", loadMoreAlerts);

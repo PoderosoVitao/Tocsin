@@ -5,8 +5,8 @@ jobs, when the numbers got worse.
 
 > **Status: work in progress.** The core works and is tested: tocsin notices when a job misses
 > its schedule, fails or runs too long, and sends exactly one Telegram alert for it, and a
-> dashboard shows and manages everything. Evaluation checks alert on their numbers. An eval page,
-> adapters for other tools and failure summaries are still to come (see the
+> dashboard shows and manages everything. Evaluation checks alert on their numbers and have a page of
+> their own. Adapters for other evaluation tools and failure summaries are still to come (see the
 > [roadmap](#roadmap)).
 
 ## Why another job monitor
@@ -164,6 +164,14 @@ still runs, a warning goes to stderr, and the command's own exit code is returne
   stored with the report and its findings, with about how many more runs would settle it. It isn't
   a recovery either: a check that is down stays down until a report is clearly fine. A missed run
   is the ordinary dead man's switch. A good report brings the check back up.
+- **Eval page.** The page of an eval check (`/#/checks/<id>`) gains an Evaluation panel: the latest
+  verdict with what the rules found, and for each scenario its pass rate with the 95% interval, the
+  latency percentiles and cost, and a chart of the pass rate over the last 100 reports with the
+  interval as a band, the baseline as a dashed line and a dotted line wherever a label changed (a new
+  model, prompt version or commit). Failing reports are diamonds and "not enough data" ones are
+  open circles, so the colours aren't the only signal. Below are "what changed" at each label
+  change and the latest reports with their labels and a link to the full report. Scenarios with a
+  finding come first, and the rest are behind "Show all".
 - **Rate limiting** per check in Redis (60 pings a minute by default). If Redis is down, pings are
   still accepted.
 - **Operations:** `/healthz`, and Prometheus metrics on `/metrics`, including
@@ -272,7 +280,8 @@ with nothing retrying it); and the API's health endpoint, when `TOCSIN_SELF_CHEC
 | 4. Eval checks | Statistics: Wilson intervals, regression test against a baseline | Done |
 | | Result schema, storage and `GET /api/checks/<id>/eval` | Done |
 | | Alert rules: floor, regression, not enough data, budget | Done |
-| | Eval page, JUnit and Stochast adapters | Next |
+| | Eval page | Done |
+| | JUnit and Stochast adapters | Next |
 | 5. Summaries | Redaction, LLM summaries (Claude, OpenAI and others), evaluation of the summariser | Planned |
 
 ## Development

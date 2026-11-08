@@ -241,3 +241,31 @@ dialog form .actions { margin-top: 4px; }
 .row-status.bad { color: var(--critical-ink); }
 .row-status.good { color: var(--good-ink); }
 @media (max-width: 760px) { .field-row { grid-template-columns: 1fr; } .nav { flex-wrap: wrap; } }
+
+/* Evaluation checks */
+.subhead { margin: 16px 0 4px; font-size: 14px; color: var(--ink-secondary); }
+.findings { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 6px; }
+.finding { border: 1px solid var(--critical-border); background: var(--critical-wash); color: var(--critical-ink); border-radius: 6px; padding: 6px 10px; overflow-wrap: anywhere; }
+.finding.needs_data { border-color: var(--warn-border); background: var(--warn-wash); color: var(--warn-ink); }
+.badge.verdict-ok { color: var(--good-ink); background: var(--good-wash); border-color: var(--good-border); }
+.badge.verdict-failing { color: var(--critical-ink); background: var(--surface); border-color: var(--critical-border); }
+.badge.verdict-needs_data { color: var(--warn-ink); background: var(--surface); border-color: var(--warn-border); }
+.scenarios { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 12px; }
+.scenario { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; min-width: 0; }
+.scenario-head { display: flex; gap: 8px; justify-content: space-between; align-items: baseline; flex-wrap: wrap; }
+.scenario-name { font-weight: 600; overflow-wrap: anywhere; }
+.scenario-rate { font-variant-numeric: tabular-nums; }
+.scenario-sub { color: var(--ink-muted); font-size: 12px; }
+.chart { width: 100%; height: auto; display: block; margin-top: 6px; }
+.chart text { fill: var(--ink-muted); font-size: 10px; font-family: inherit; }
+.chart .grid { stroke: var(--border); stroke-width: 1; }
+.chart .band { fill: var(--accent); opacity: 0.16; }
+.chart .line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.chart .baseline { fill: none; stroke: var(--ink-muted); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.chart .marker { stroke: var(--warn-ink); stroke-width: 1; stroke-dasharray: 2 3; }
+.chart .dot-ok { fill: var(--accent); }
+.chart .dot-failing { fill: var(--critical); }
+.chart .dot-needs_data { fill: var(--surface); stroke: var(--warn-ink); stroke-width: 2; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--ink-muted); font-size: 12px; margin-top: 2px; }
+.report-labels { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+@media (max-width: 760px) { .scenarios { grid-template-columns: 1fr; } }
