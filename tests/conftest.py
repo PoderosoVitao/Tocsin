@@ -15,7 +15,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from tests.helpers import FakeSender
+from tests.helpers import FakeSender, FakeTocsin
 from tocsin.alerts import DeliveryKey
 from tocsin.api.app import create_app
 from tocsin.apikeys import create_key
@@ -164,3 +164,10 @@ async def client(
         transport=transport, base_url="https://tocsin.test", headers=headers
     ) as client:
         yield client
+
+
+@pytest.fixture
+def tocsin() -> Iterator[FakeTocsin]:
+    fake = FakeTocsin()
+    yield fake
+    fake.server.shutdown()

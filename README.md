@@ -6,8 +6,8 @@ jobs, when the numbers got worse.
 > **Status: work in progress.** The core works and is tested: tocsin notices when a job misses
 > its schedule, fails or runs too long, and sends exactly one Telegram alert for it, and a
 > dashboard shows and manages everything. Evaluation checks alert on their numbers and have a page of
-> their own. Adapters for other evaluation tools and failure summaries are still to come (see the
-> [roadmap](#roadmap)).
+> their own, and JUnit test results can be sent as evaluation reports. An adapter for Stochast and
+> failure summaries are still to come (see the [roadmap](#roadmap)).
 
 ## Why another job monitor
 
@@ -172,6 +172,25 @@ still runs, a warning goes to stderr, and the command's own exit code is returne
   open circles, so the colours aren't the only signal. Below are "what changed" at each label
   change and the latest reports with their labels and a link to the full report. Scenarios with a
   finding come first, and the rest are behind "Show all".
+- **JUnit adapter.** Most test tools can write JUnit XML (`pytest --junitxml`, Maven Surefire,
+  Jest and Vitest reporters, `gotestsum`), so `tocsin report junit` turns those results into a
+  `tocsin.eval/v1` report and sends it as the check's success ping:
+
+  ```
+  tocsin report junit --check <ping uuid> --server http://localhost:8000 \
+    --label model=claude-sonnet-5-5 --label git_sha=$(git rev-parse --short HEAD) results.xml
+  ```
+
+  Each distinct test is a scenario, and a test that appears several times in the results (a
+  repeated or parametrised run) gets a pass rate; a failure or an error is a failed run, a flaky
+  test that a rerun passed counts as passed, and skipped tests are left out. Latency comes from
+  the `time` attributes (p50 and p95). Several files make one report, `-` reads standard input,
+  `--group-by class` makes each class one scenario for suites with more than 1000 tests, and
+  `--dry-run` prints the report instead of sending it. XML that declares a DOCTYPE or entities is
+  refused. If the results can't be read, tocsin is sent a failure with the reason, so the check
+  goes down with it in the alert. The command exits 1 if tocsin refuses the report or can't be
+  reached, so add `|| true` where an outage shouldn't fail your pipeline. It uses only the
+  standard library, like `tocsin run`.
 - **Rate limiting** per check in Redis (60 pings a minute by default). If Redis is down, pings are
   still accepted.
 - **Operations:** `/healthz`, and Prometheus metrics on `/metrics`, including
@@ -281,7 +300,8 @@ with nothing retrying it); and the API's health endpoint, when `TOCSIN_SELF_CHEC
 | | Result schema, storage and `GET /api/checks/<id>/eval` | Done |
 | | Alert rules: floor, regression, not enough data, budget | Done |
 | | Eval page | Done |
-| | JUnit and Stochast adapters | Next |
+| | JUnit adapter | Done |
+| | Stochast adapter | Next |
 | 5. Summaries | Redaction, LLM summaries (Claude, OpenAI and others), evaluation of the summariser | Planned |
 
 ## Development

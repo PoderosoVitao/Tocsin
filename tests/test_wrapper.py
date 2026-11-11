@@ -2,53 +2,15 @@ from __future__ import annotations
 
 import socket
 import sys
-import threading
 import time
-from collections.abc import Iterator
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
+from tests.helpers import FakeTocsin
 from tocsin.cli import main
 from tocsin.wrapper import run
 
 CHECK = "0b9e5bd4-77a4-4a2c-9a51-6b1f6b2d3c11"
-
-
-class FakeTocsin:
-    def __init__(self, status: int = 200) -> None:
-        self.status = status
-        self.requests: list[tuple[str, str, bytes]] = []
-        fake = self
-
-        class Handler(BaseHTTPRequestHandler):
-            def _record(self) -> None:
-                length = int(self.headers.get("Content-Length") or 0)
-                fake.requests.append((self.command, self.path, self.rfile.read(length)))
-                self.send_response(fake.status)
-                self.send_header("Content-Length", "2")
-                self.end_headers()
-                self.wfile.write(b"OK")
-
-            do_GET = do_POST = _record
-
-            def log_message(self, *args: object) -> None:
-                pass
-
-        self.server = HTTPServer(("127.0.0.1", 0), Handler)
-        self.url = f"http://127.0.0.1:{self.server.server_port}"
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
-
-    @property
-    def paths(self) -> list[str]:
-        return [path for _, path, _ in self.requests]
-
-
-@pytest.fixture
-def tocsin() -> Iterator[FakeTocsin]:
-    fake = FakeTocsin()
-    yield fake
-    fake.server.shutdown()
 
 
 def python(code: str) -> list[str]:

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from datetime import datetime
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
 import httpx
@@ -63,3 +65,35 @@ async def ping_at(
 async def sweep_at(sessionmaker: Sessionmaker, at: datetime) -> list[Event]:
     async with sessionmaker() as session, session.begin():
         return await sweep(session, at)
+
+
+# A stand-in for a tocsin server on a real port, for the job-side tools that
+# talk to it over HTTP: records every request it gets.
+class FakeTocsin:
+    def __init__(self, status: int = 200, reply: bytes = b"OK") -> None:
+        self.status = status
+        self.reply = reply
+        self.requests: list[tuple[str, str, bytes]] = []
+        fake = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def _record(self) -> None:
+                length = int(self.headers.get("Content-Length") or 0)
+                fake.requests.append((self.command, self.path, self.rfile.read(length)))
+                self.send_response(fake.status)
+                self.send_header("Content-Length", str(len(fake.reply)))
+                self.end_headers()
+                self.wfile.write(fake.reply)
+
+            do_GET = do_POST = _record
+
+            def log_message(self, *args: object) -> None:
+                pass
+
+        self.server = HTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_port}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    @property
+    def paths(self) -> list[str]:
+        return [path for _, path, _ in self.requests]
