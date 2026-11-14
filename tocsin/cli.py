@@ -125,28 +125,45 @@ def _ping_url(args: argparse.Namespace) -> str:
     return f"{args.server.rstrip('/')}/ping/{args.check}"
 
 
-def _read_inputs(paths: Sequence[str]) -> list[bytes]:
-    limit = 20_000_000
-    documents = []
+# Reads the files named on the command line (- is standard input), returning
+# each with its name for error messages. A directory stands for the files in it
+# that match `pattern`.
+def _read_inputs(
+    paths: Sequence[str], limit: int = 20_000_000, pattern: str = "*"
+) -> list[tuple[str, bytes]]:
+    from pathlib import Path
+
+    sources: list[str] = []
     for path in paths:
-        if path == "-":
+        if path != "-" and Path(path).is_dir():
+            found = sorted(str(item) for item in Path(path).glob(pattern))
+            if not found:
+                raise ValueError(f"{path} has no {pattern} files")
+            sources.extend(found)
+        else:
+            sources.append(path)
+
+    documents = []
+    for source in sources:
+        if source == "-":
             data = sys.stdin.buffer.read(limit + 1)
         else:
-            with open(path, "rb") as handle:
+            with open(source, "rb") as handle:
                 data = handle.read(limit + 1)
         if len(data) > limit:
-            raise ValueError(f"{path} is larger than {limit // 1_000_000} MB")
-        documents.append(data)
+            raise ValueError(f"{source} is larger than {limit // 1_000_000} MB")
+        documents.append((source, data))
     return documents
 
 
-# Converts a test tool's results to a tocsin.eval/v1 report and sends them as
+# Converts another tool's results to a tocsin.eval/v1 report and sends it as
 # the check's success ping. When the results can't be read, the check is told
 # the job failed, with the reason, so the problem is an alert and not a silence.
 def _report(args: argparse.Namespace) -> int:
     from tocsin.adapters import AdapterError
     from tocsin.adapters.junit import junit_report
     from tocsin.adapters.send import send_failure, send_report
+    from tocsin.adapters.stochast import stochast_report
 
     if not args.check and not args.dry_run:
         print("tocsin report: --check (or TOCSIN_CHECK) is required", file=sys.stderr)
@@ -158,24 +175,35 @@ def _report(args: argparse.Namespace) -> int:
             print(f"tocsin report: --label wants name=value, not {item!r}", file=sys.stderr)
             return 2
         labels[name] = value
+    stochast = args.report_format == "stochast"
     try:
-        documents = _read_inputs(args.files)
+        documents = _read_inputs(
+            args.files,
+            limit=200_000_000 if stochast else 20_000_000,
+            pattern="*.json" if stochast else "*.xml",
+        )
     except (OSError, ValueError) as exc:
         print(f"tocsin report: {exc}", file=sys.stderr)
         return 2
 
     try:
-        report = junit_report(
-            documents,
-            suite=args.suite,
-            labels=labels,
-            report_url=args.report_url,
-            group_by=args.group_by,
-        )
+        if stochast:
+            report = stochast_report(
+                documents, suite=args.suite, labels=labels, report_url=args.report_url
+            )
+        else:
+            report = junit_report(
+                [data for _, data in documents],
+                suite=args.suite,
+                labels=labels,
+                report_url=args.report_url,
+                group_by=args.group_by,
+            )
     except AdapterError as exc:
         print(f"tocsin report: {exc}", file=sys.stderr)
         if not args.dry_run:
-            send_failure(_ping_url(args), f"could not read the test results: {exc}", args.timeout)
+            what = "Stochast results" if stochast else "test results"
+            send_failure(_ping_url(args), f"could not read the {what}: {exc}", args.timeout)
         return 1
 
     if args.dry_run:
@@ -254,38 +282,59 @@ def build_parser() -> argparse.ArgumentParser:
     report = commands.add_parser(
         "report", help="send an evaluation report converted from another tool's results"
     ).add_subparsers(dest="report_format", required=True)
+
+    def report_options(parser: argparse.ArgumentParser, files_help: str, suite_help: str) -> None:
+        parser.add_argument("files", nargs="+", metavar="FILE", help=files_help)
+        parser.add_argument("--check", default=os.environ.get("TOCSIN_CHECK"), help=check_help)
+        parser.add_argument(
+            "--server",
+            default=os.environ.get("TOCSIN_URL", "http://localhost:8000"),
+            help=server_help,
+        )
+        parser.add_argument("--suite", help=suite_help)
+        parser.add_argument(
+            "--label",
+            action="append",
+            default=[],
+            metavar="NAME=VALUE",
+            help="what was evaluated, e.g. --label model=claude-sonnet-5-5 (repeatable)",
+        )
+        parser.add_argument("--report-url", help="a link to the full report")
+        parser.add_argument(
+            "--timeout", type=float, default=10, help="seconds to wait (default: 10)"
+        )
+        parser.add_argument(
+            "--dry-run", action="store_true", help="print the report instead of sending it"
+        )
+        parser.set_defaults(handler=_report)
+
     junit = report.add_parser(
         "junit",
         help="send JUnit XML test results (pytest --junitxml, Maven Surefire, Jest, ...)",
         usage="tocsin report junit --check <uuid or ping URL> [options] results.xml [...]",
     )
-    junit.add_argument(
-        "files", nargs="+", metavar="results.xml", help="JUnit XML files, or - for stdin"
+    report_options(
+        junit,
+        "JUnit XML files, a directory of them, or - for stdin",
+        "the report's suite name (default: the suite's own name)",
     )
-    junit.add_argument("--check", default=os.environ.get("TOCSIN_CHECK"), help=check_help)
-    junit.add_argument(
-        "--server", default=os.environ.get("TOCSIN_URL", "http://localhost:8000"), help=server_help
-    )
-    junit.add_argument("--suite", help="the report's suite name (default: the suite's own name)")
-    junit.add_argument(
-        "--label",
-        action="append",
-        default=[],
-        metavar="NAME=VALUE",
-        help="what was evaluated, e.g. --label model=claude-sonnet-5-5 (repeatable)",
-    )
-    junit.add_argument("--report-url", help="a link to the full report")
     junit.add_argument(
         "--group-by",
         choices=["test", "class"],
         default="test",
         help="a scenario per distinct test (default) or per class, for big suites",
     )
-    junit.add_argument("--timeout", type=float, default=10, help="seconds to wait (default: 10)")
-    junit.add_argument(
-        "--dry-run", action="store_true", help="print the report instead of sending it"
+
+    stochast = report.add_parser(
+        "stochast",
+        help="send the results Stochast saved (stochast-results/*.json)",
+        usage="tocsin report stochast --check <uuid or ping URL> [options] stochast-results",
     )
-    junit.set_defaults(handler=_report)
+    report_options(
+        stochast,
+        "a results file Stochast saved, or the directory of them",
+        "the report's suite name (default: stochast)",
+    )
     return parser
 
 

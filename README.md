@@ -6,8 +6,8 @@ jobs, when the numbers got worse.
 > **Status: work in progress.** The core works and is tested: tocsin notices when a job misses
 > its schedule, fails or runs too long, and sends exactly one Telegram alert for it, and a
 > dashboard shows and manages everything. Evaluation checks alert on their numbers and have a page of
-> their own, and JUnit test results can be sent as evaluation reports. An adapter for Stochast and
-> failure summaries are still to come (see the [roadmap](#roadmap)).
+> their own, and JUnit test results can be sent as evaluation reports. Stochast results can be
+> sent the same way. Failure summaries are still to come (see the [roadmap](#roadmap)).
 
 ## Why another job monitor
 
@@ -191,6 +191,27 @@ still runs, a warning goes to stderr, and the command's own exit code is returne
   goes down with it in the alert. The command exits 1 if tocsin refuses the report or can't be
   reached, so add `|| true` where an outage shouldn't fail your pipeline. It uses only the
   standard library, like `tocsin run`.
+- **Stochast adapter.** [Stochast](https://github.com/PoderosoVitao/Stochast) saves each scenario's
+  runs as JSON under `stochast-results/`. `tocsin report stochast` turns those files into a
+  `tocsin.eval/v1` report, so a nightly Stochast run can be watched by tocsin without any change
+  to Stochast:
+
+  ```
+  stochast run scenarios.py --adapter agent.py:build_adapter --fail-under 0
+  tocsin report stochast stochast-results --check <ping uuid> --server http://localhost:8000 \
+    --suite refund-agent --label model=gpt-4.1 --label prompt_version=v12
+  ```
+
+  Each scenario becomes a scenario with its number of runs and how many passed (Stochast's own
+  definition: no error and every assertion held, so a run lost to a transport error counts as not
+  passed). Latency is p50, p95 and p99 of the runs, worked out the way Stochast's report does,
+  and the cost is the sum over the runs when Stochast was given token prices. The numbers match
+  Stochast's own report for the same files, and tocsin's Wilson intervals use the same formula.
+  Only counts and numbers are sent: outputs, tool calls and messages stay on the machine.
+  Stochast doesn't record which model or prompt it ran, so name them with `--label`. A directory
+  stands for the `.json` files in it, and a scenario that appears in more than one file is
+  refused instead of added up. `--fail-under 0` keeps `stochast run` from stopping the job
+  before the report is sent; whether the numbers are a regression is for tocsin to say.
 - **Rate limiting** per check in Redis (60 pings a minute by default). If Redis is down, pings are
   still accepted.
 - **Operations:** `/healthz`, and Prometheus metrics on `/metrics`, including
@@ -296,12 +317,7 @@ with nothing retrying it); and the API's health endpoint, when `TOCSIN_SELF_CHEC
 | 1. Core | Checks, pings, overdue sweep, exactly-once Telegram alerts, API keys, rate limiting, metrics, CI, Docker Compose | Done |
 | 2. Usable | Start/finish runs and durations, CLI wrapper, flapping rules, self-monitoring | Done |
 | 3. Dashboard | Overview with live updates, check page, alert log, settings | Done |
-| 4. Eval checks | Statistics: Wilson intervals, regression test against a baseline | Done |
-| | Result schema, storage and `GET /api/checks/<id>/eval` | Done |
-| | Alert rules: floor, regression, not enough data, budget | Done |
-| | Eval page | Done |
-| | JUnit adapter | Done |
-| | Stochast adapter | Next |
+| 4. Eval checks | Statistics, result schema and storage, alert rules (floor, regression, not enough data, budget), eval page, JUnit and Stochast adapters | Done |
 | 5. Summaries | Redaction, LLM summaries (Claude, OpenAI and others), evaluation of the summariser | Planned |
 
 ## Development
