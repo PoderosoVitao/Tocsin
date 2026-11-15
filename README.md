@@ -299,6 +299,38 @@ with nothing retrying it); and the API's health endpoint, when `TOCSIN_SELF_CHEC
 - The server's clock. If it drifts, deadlines drift with it.
 - Outages shorter than the external check's grace period, and anything between two heartbeats.
 
+## Redaction
+
+Failure summaries will send a job's output to a third party's model, and that output can hold
+anything the job saw. Before any of it leaves, `tocsin.redact` scrubs it. This is built and
+tested, and the summaries that use it come next.
+
+It removes, replacing each with a marker such as `[REDACTED:github-token]`:
+
+- private keys (a PEM block, to its end or to the end of the output if it has none);
+- credentials with a recognisable shape: AWS, GitHub, OpenAI, Anthropic, Slack, Google, Stripe and
+  Telegram keys, JWTs, tocsin's own API keys, and the secret uuid in a tocsin ping URL;
+- `user:password@` in a URL, `Authorization`, `Cookie` and similar headers, and `Bearer` or `Basic`
+  values;
+- the value of anything named like a secret: `password`, `passwd`, `secret`, `token`, `api_key`,
+  `access_key`, `credentials`, `signature`, `session_id` and the like, as `NAME=value`,
+  `"name": "value"` or `--name value`. The name has to be a word of its own, so `passed: 5` and
+  `tokens: 812` are left alone;
+- e-mail addresses, and terminal colour codes;
+- any long run (20 characters or more) that looks random: letters and digits, enough entropy, and
+  mixed case if it contains `/`, `-` or `_`. Paths, slugs and uuids are kept.
+
+Then it keeps only the last 4000 characters, since the end of the output is where the error is.
+Redaction runs on the whole text before it is cut, so a secret can't survive as a fragment.
+
+It errs towards removing too much, and it can't catch everything. **A short password, or a
+password that is an ordinary word, with nothing around it to say it is one, looks like text and
+gets through.** So do secrets written in a form not listed above, and a password given as `-pSECRET`
+with no space. Summaries stay off by default and are switched on per check, so you choose which
+jobs' output may leave the machine. The tests plant 27 fake credentials in realistic places (error
+messages, connection strings, command lines, JSON, a PEM block) and in random surroundings, and
+check that none survives, and that ordinary diagnostic text passes through unchanged.
+
 ## Limitations
 
 - **Telegram is the only channel** so far. Email and outgoing webhooks are planned.
@@ -318,7 +350,8 @@ with nothing retrying it); and the API's health endpoint, when `TOCSIN_SELF_CHEC
 | 2. Usable | Start/finish runs and durations, CLI wrapper, flapping rules, self-monitoring | Done |
 | 3. Dashboard | Overview with live updates, check page, alert log, settings | Done |
 | 4. Eval checks | Statistics, result schema and storage, alert rules (floor, regression, not enough data, budget), eval page, JUnit and Stochast adapters | Done |
-| 5. Summaries | Redaction, LLM summaries (Claude, OpenAI and others), evaluation of the summariser | Planned |
+| 5. Summaries | Redaction | Done |
+| | LLM summaries (Claude, OpenAI and others), evaluation of the summariser | Next |
 
 ## Development
 
