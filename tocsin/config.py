@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -36,6 +37,22 @@ class Settings(BaseSettings):
     delivery_backoff_base_seconds: float = 5
     delivery_backoff_cap_seconds: float = 1800
     telegram_api_url: str = "https://api.telegram.org"
+
+    # Failure summaries. Off until a provider is named, and then only for the
+    # checks that switch them on. The key is only ever sent to the provider.
+    #   anthropic          Claude (the model defaults to claude-opus-5-5)
+    #   openai             OpenAI, or any server speaking its chat API when
+    #                      llm_base_url is set
+    #   openai-compatible  OpenRouter, Groq, Ollama, vLLM and the like; needs
+    #                      llm_base_url, and the key is optional
+    llm_provider: str | None = None
+    llm_api_key: SecretStr | None = None
+    llm_model: str | None = None
+    llm_base_url: str | None = None
+    llm_timeout_seconds: float = 20
+    # The most summaries asked for per day (UTC). Past it, alerts go out
+    # without one.
+    summary_daily_limit: int = 100
 
     # Self-monitoring. Every minute a worker pings this URL (a check on another
     # monitor, such as healthchecks.io or a second tocsin) while tocsin is
