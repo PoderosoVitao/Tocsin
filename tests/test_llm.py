@@ -227,6 +227,9 @@ async def test_a_refusal_from_claude_is_an_error(
 
 def test_nothing_is_built_until_a_provider_is_named(http: httpx.AsyncClient) -> None:
     assert build_llm(Settings(), http) is None
+    # A compose file passes unset variables through as empty strings.
+    empty = Settings(llm_provider="", llm_api_key=SecretStr(""), llm_model="", llm_base_url="")
+    assert build_llm(empty, http) is None
 
 
 @pytest.mark.parametrize(

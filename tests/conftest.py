@@ -121,9 +121,13 @@ async def redis(redis_url: str) -> AsyncIterator[Redis]:
 class RecordingDispatcher:
     def __init__(self) -> None:
         self.keys: list[DeliveryKey] = []
+        self.summaries: list[int] = []
 
     async def deliver(self, keys: Sequence[DeliveryKey]) -> None:
         self.keys.extend(keys)
+
+    async def summarize(self, event_ids: Sequence[int]) -> None:
+        self.summaries.extend(event_ids)
 
 
 @pytest.fixture

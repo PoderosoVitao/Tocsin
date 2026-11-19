@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tocsin.alerts import create_deliveries, should_alert
+from tocsin.alerts import create_deliveries, request_summary, should_alert
 from tocsin.models import Check, Event, State
 from tocsin.schedule import next_due
 
@@ -54,6 +54,7 @@ def in_cooldown(check: Check, now: datetime) -> bool:
 # last reported as, which the cooldown and reminders are measured from.
 async def alert(session: AsyncSession, check: Check, event: Event, now: datetime) -> None:
     await create_deliveries(session, event, now)
+    request_summary(session, check, event)
     check.last_alert_at = now
     check.last_alerted_state = event.to_state
 

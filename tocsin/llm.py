@@ -186,7 +186,7 @@ def _count(value: object) -> int | None:
 # on every summary.
 def build_llm(settings: Settings, http: httpx.AsyncClient) -> LLM | None:
     provider = settings.llm_provider
-    if provider is None:
+    if not provider:  # unset, or set to nothing by a compose file
         return None
     if provider not in PROVIDERS:
         raise LLMConfigError(f"TOCSIN_LLM_PROVIDER must be one of {', '.join(PROVIDERS)}")
@@ -199,7 +199,10 @@ def build_llm(settings: Settings, http: httpx.AsyncClient) -> LLM | None:
         except ImportError:
             raise LLMConfigError("the anthropic package is not installed") from None
         return AnthropicLLM(
-            key, settings.llm_model or DEFAULT_ANTHROPIC_MODEL, settings.llm_base_url, timeout
+            key,
+            settings.llm_model or DEFAULT_ANTHROPIC_MODEL,
+            settings.llm_base_url or None,
+            timeout,
         )
 
     if not settings.llm_model:

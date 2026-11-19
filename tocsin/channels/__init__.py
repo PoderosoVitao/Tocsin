@@ -37,6 +37,8 @@ class Alert:
     occurred_at: datetime
     link: str | None = None
     output_excerpt: str | None = None
+    # One line from a language model on the likely cause, when there is one.
+    summary: str | None = None
 
     @property
     def headline(self) -> str:
@@ -51,6 +53,11 @@ class Alert:
 class Sender(Protocol):
     # Sends the alert and returns the id the channel gave the message, if any.
     async def send(self, config: dict[str, Any], alert: Alert) -> str | None: ...
+
+    # Replaces a message sent earlier (by the id `send` returned) with the
+    # alert as it reads now, which is how a summary reaches an alert that went
+    # out without one.
+    async def edit(self, config: dict[str, Any], external_id: str, alert: Alert) -> None: ...
 
 
 # Checks a channel's config when it is created, so a typo shows up as a 422

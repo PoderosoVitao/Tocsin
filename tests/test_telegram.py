@@ -99,3 +99,49 @@ def test_config_validation() -> None:
         validate_config("telegram", {"bot_token": TOKEN})
     with pytest.raises(ValueError, match="unknown channel kind"):
         validate_config("pager", {})
+
+
+SUMMARISED = Alert(**{**ALERT.__dict__, "summary": "Disk full on <b>/mnt</b> & more"})
+
+
+async def test_a_summary_is_shown_escaped_and_labelled_as_machine_generated() -> None:
+    seen: list[httpx.Request] = []
+    sender = sender_returning(200, {"ok": True, "result": {"message_id": 1}}, seen)
+    await sender.send(CONFIG, SUMMARISED)
+    text = json.loads(seen[0].content)["text"]
+    assert text.splitlines()[2] == (
+        "🤖 <i>Disk full on &lt;b&gt;/mnt&lt;/b&gt; &amp; more</i> "
+        "(machine-generated, may be wrong)"
+    )
+
+
+async def test_an_alert_without_a_summary_has_no_summary_line() -> None:
+    seen: list[httpx.Request] = []
+    await sender_returning(200, {"ok": True, "result": {"message_id": 1}}, seen).send(CONFIG, ALERT)
+    assert "machine-generated" not in json.loads(seen[0].content)["text"]
+
+
+async def test_edit_replaces_the_message_that_was_sent() -> None:
+    seen: list[httpx.Request] = []
+    sender = sender_returning(200, {"ok": True, "result": {"message_id": 99}}, seen)
+
+    await sender.edit(CONFIG, "99", SUMMARISED)
+
+    [request] = seen
+    assert request.url == f"https://api.telegram.org/bot{TOKEN}/editMessageText"
+    payload = json.loads(request.content)
+    assert (payload["chat_id"], payload["message_id"], payload["parse_mode"]) == (
+        "-100200",
+        99,
+        "HTML",
+    )
+    assert "machine-generated" in payload["text"] and "<pre>" in payload["text"]
+
+
+async def test_a_refused_edit_is_an_error_that_does_not_leak_the_token() -> None:
+    sender = sender_returning(
+        400, {"ok": False, "description": "Bad Request: message to edit not found"}, []
+    )
+    with pytest.raises(PermanentError, match="message to edit not found") as caught:
+        await sender.edit(CONFIG, "99", SUMMARISED)
+    assert TOKEN not in str(caught.value)

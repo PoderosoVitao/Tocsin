@@ -48,6 +48,10 @@ class CheckIn(BaseModel):
     reminder_seconds: int | None = Field(default=None, ge=60, le=MAX_REMINDER_SECONDS)
     # What an eval check alerts on. Only for kind "eval".
     eval_rules: EvalRules | None = None
+    # Add a machine-written line on the likely cause to the alert for a failed
+    # run. Needs a language model to be set up on the server (see the README),
+    # and sends the run's output, redacted, to its provider.
+    summary_enabled: bool = False
     # The channels to alert. Left out, a new check alerts every channel, which
     # is what a single user with one Telegram chat wants.
     channel_ids: list[uuid.UUID] | None = None
@@ -78,6 +82,7 @@ class CheckPatch(BaseModel):
     cooldown_seconds: int | None = Field(default=None, ge=0, le=MAX_COOLDOWN_SECONDS)
     reminder_seconds: int | None = Field(default=None, ge=60, le=MAX_REMINDER_SECONDS)
     eval_rules: EvalRules | None = None
+    summary_enabled: bool | None = None
     channel_ids: list[uuid.UUID] | None = None
     paused: bool | None = None
 
@@ -94,6 +99,7 @@ class CheckOut(BaseModel):
     reminder_seconds: int | None
     # Set for eval checks: every rule, with defaults filled in.
     eval_rules: EvalRules | None
+    summary_enabled: bool
     state: State
     due_at: datetime | None
     next_expected_at: datetime | None
@@ -120,6 +126,7 @@ class CheckOut(BaseModel):
             eval_rules=(
                 EvalRules.model_validate(check.eval_rules) if check.kind == CheckKind.EVAL else None
             ),
+            summary_enabled=check.summary_enabled,
             state=displayed_state(check, now),
             due_at=check.due_at,
             next_expected_at=check.next_expected_at,
@@ -187,9 +194,12 @@ class RunOut(BaseModel):
     duration_ms: int | None
     exit_code: int | None
     output_tail: str | None
+    # A language model's line on why the run failed, when the check asks for one
+    # and it has arrived. Machine-generated.
+    summary: str | None = None
 
     @classmethod
-    def build(cls, run: Run) -> RunOut:
+    def build(cls, run: Run, summary: str | None = None) -> RunOut:
         return cls(
             id=run.id,
             status=RunStatus(run.status),
@@ -198,6 +208,7 @@ class RunOut(BaseModel):
             duration_ms=run.duration_ms,
             exit_code=run.exit_code,
             output_tail=run.output_tail,
+            summary=summary,
         )
 
 

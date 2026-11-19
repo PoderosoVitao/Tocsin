@@ -24,6 +24,8 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
 def render(alert: Alert) -> str:
     icon = ICONS.get(State(alert.to_state), "⚪")
     lines = [f"{icon} <b>{html.escape(alert.headline)}</b>", html.escape(alert.reason)]
+    if alert.summary:
+        lines.append(f"🤖 <i>{html.escape(alert.summary)}</i> (machine-generated, may be wrong)")
     if alert.output_excerpt:
         lines.append(f"<pre>{html.escape(alert.output_excerpt)}</pre>")
     if alert.link:
@@ -48,6 +50,19 @@ class TelegramSender:
             },
         )
         return str(result["message_id"])
+
+    async def edit(self, config: dict[str, Any], external_id: str, alert: Alert) -> None:
+        await self._call(
+            config,
+            "editMessageText",
+            {
+                "chat_id": config["chat_id"],
+                "message_id": int(external_id),
+                "text": render(alert),
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            },
+        )
 
     # Calls the Bot API. The bot token is part of the URL, and httpx puts the
     # URL in its exception messages, so errors are rebuilt from the status

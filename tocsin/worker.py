@@ -22,7 +22,9 @@ from tocsin.config import Settings, get_settings
 from tocsin.db import Sessionmaker, create_engine, create_sessionmaker
 from tocsin.events import alert_updated, publish
 from tocsin.heartbeat import HEARTBEAT_INTERVAL_SECONDS, heartbeat
+from tocsin.llm import LLM, LLMConfigError, build_llm
 from tocsin.models import Event
+from tocsin.summaries import summarize
 from tocsin.sweep import run_sweep
 
 log = logging.getLogger(__name__)
@@ -37,6 +39,7 @@ RELAY_INTERVAL_SECONDS = 5
 SWEEP = "tocsin.sweep"
 SWEEP_INTERVAL_SECONDS = 5
 HEARTBEAT = "tocsin.heartbeat"
+SUMMARIZE = "tocsin.summarize"
 
 
 def build_senders(http: httpx.AsyncClient, settings: Settings) -> dict[str, Sender]:
@@ -53,11 +56,18 @@ class Resources:
     http: httpx.AsyncClient
     senders: dict[str, Sender]
     redis: Redis
+    # None when failure summaries are not set up.
+    llm: LLM | None
 
     @classmethod
     def open(cls, settings: Settings) -> Resources:
         engine = create_engine(settings.database_url)
         http = httpx.AsyncClient()
+        try:
+            llm = build_llm(settings, http)
+        except LLMConfigError as exc:
+            log.error("failure summaries are off: %s", exc)
+            llm = None
         return cls(
             settings,
             engine,
@@ -65,9 +75,12 @@ class Resources:
             http,
             build_senders(http, settings),
             Redis.from_url(settings.redis_url),
+            llm,
         )
 
     async def close(self) -> None:
+        if self.llm is not None:
+            await self.llm.close()
         await self.redis.aclose()
         await self.http.aclose()
         await self.engine.dispose()
@@ -83,6 +96,11 @@ class TaskiqDispatcher:
         kicker: AsyncKicker[..., str] = AsyncKicker(DELIVER, self.broker, {})
         for key in keys:
             await kicker.kiq(key.event_id, str(key.channel_id))
+
+    async def summarize(self, event_ids: Sequence[int]) -> None:
+        kicker: AsyncKicker[..., str] = AsyncKicker(SUMMARIZE, self.broker, {})
+        for event_id in event_ids:
+            await kicker.kiq(event_id)
 
 
 def register_tasks(broker: AsyncBroker, settings: Settings) -> None:
@@ -115,6 +133,25 @@ def register_tasks(broker: AsyncBroker, settings: Settings) -> None:
             if check_id is not None:
                 await publish(resources.redis, alert_updated(check_id))
         return status
+
+    # Adds a line on the likely cause to the alert for a failed run. Anything
+    # that goes wrong leaves the alert as it was, so nothing is retried.
+    @broker.task(task_name=SUMMARIZE)
+    async def summarize_task(event_id: int, context: Context = TaskiqDepends()) -> str:
+        resources: Resources = context.state.resources
+        try:
+            return await summarize(
+                resources.sessionmaker,
+                resources.redis,
+                resources.llm,
+                resources.senders,
+                resources.settings,
+                event_id,
+                datetime.now(UTC),
+            )
+        except Exception:
+            log.exception("could not summarise event %s", event_id)
+            return "failed"
 
     # Queues retries that are due and deliveries whose first enqueue was lost.
     @broker.task(task_name=RELAY_DELIVERIES, schedule=[{"interval": RELAY_INTERVAL_SECONDS}])

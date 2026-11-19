@@ -15,6 +15,12 @@ x-tocsin: &tocsin
     # A check on another monitor that tocsin pings every minute while healthy.
     TOCSIN_SELF_PING_URL: ${TOCSIN_SELF_PING_URL:-}
     TOCSIN_SELF_CHECK_API_URL: http://api:8000
+    # Failure summaries (see the README). Off until a provider is named.
+    TOCSIN_LLM_PROVIDER: ${TOCSIN_LLM_PROVIDER:-}
+    TOCSIN_LLM_API_KEY: ${TOCSIN_LLM_API_KEY:-}
+    TOCSIN_LLM_MODEL: ${TOCSIN_LLM_MODEL:-}
+    TOCSIN_LLM_BASE_URL: ${TOCSIN_LLM_BASE_URL:-}
+    TOCSIN_SUMMARY_DAILY_LIMIT: ${TOCSIN_SUMMARY_DAILY_LIMIT:-100}
 
 services:
   postgres:

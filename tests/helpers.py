@@ -41,6 +41,9 @@ class FakeSender:
         self.delay = delay
         self.calls: list[Alert] = []
         self.sent: list[Alert] = []
+        # (message id, alert as edited), for edits.
+        self.edits: list[tuple[str, Alert]] = []
+        self.edit_error: Exception | None = None
 
     async def send(self, config: dict[str, Any], alert: Alert) -> str | None:
         self.calls.append(alert)
@@ -51,6 +54,11 @@ class FakeSender:
             raise outcome
         self.sent.append(alert)
         return outcome
+
+    async def edit(self, config: dict[str, Any], external_id: str, alert: Alert) -> None:
+        if self.edit_error is not None:
+            raise self.edit_error
+        self.edits.append((external_id, alert))
 
 
 # Sends a ping as if it arrived at `at`, going through the same code as the

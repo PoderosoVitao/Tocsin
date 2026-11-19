@@ -119,6 +119,10 @@ class Check(Base):
     eval_rules: Mapped[dict[str, Any]] = mapped_column(
         default=dict, server_default=text("'{}'::jsonb")
     )
+    # Ask a language model for a line on why a failed run failed (see
+    # tocsin.summaries). Off unless switched on, since it sends job output, even
+    # if redacted, to a third party.
+    summary_enabled: Mapped[bool] = mapped_column(default=False, server_default=false())
     state: Mapped[str] = mapped_column(String(16), default=State.NEW)
     # When the next ping is due according to the schedule, and that time plus
     # the grace period. The sweep only looks at the second one.
@@ -158,6 +162,21 @@ class Run(Base):
     duration_ms: Mapped[int | None]
     exit_code: Mapped[int | None]
     output_tail: Mapped[str | None] = mapped_column(Text)
+
+
+# What a language model said about why a run failed. One per run.
+class Summary(Base):
+    __tablename__ = "summaries"
+
+    run_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("runs.id", ondelete="CASCADE"), primary_key=True
+    )
+    text: Mapped[str] = mapped_column(Text)
+    provider: Mapped[str] = mapped_column(String(32))
+    model: Mapped[str] = mapped_column(String(200))
+    input_tokens: Mapped[int | None]
+    output_tokens: Mapped[int | None]
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 
 class EvalReport(Base):

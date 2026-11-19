@@ -21,6 +21,7 @@ from tocsin.models import (
     Event,
     Run,
     State,
+    Summary,
     check_channels,
 )
 
@@ -42,6 +43,9 @@ OUTPUT_EXCERPT_CHARS = 1500
 # created them commits. Kept on the session so every code path that changes
 # state hands its deliveries to the same place.
 PENDING_KEY = "tocsin.pending_deliveries"
+# The same for summary jobs: events whose run is to be summarised once the
+# alert for it is safely committed.
+PENDING_SUMMARIES_KEY = "tocsin.pending_summaries"
 
 
 class DeliveryKey(NamedTuple):
@@ -51,6 +55,8 @@ class DeliveryKey(NamedTuple):
 
 class Dispatcher(Protocol):
     async def deliver(self, keys: Sequence[DeliveryKey]) -> None: ...
+
+    async def summarize(self, event_ids: Sequence[int]) -> None: ...
 
 
 def should_alert(from_state: str, to_state: str) -> bool:
@@ -79,16 +85,32 @@ async def create_deliveries(session: AsyncSession, event: Event, now: datetime) 
     await session.flush()
 
 
+# Asks for a summary of the run behind a failure alert, if the check wants
+# one. Only remembers the request: it is queued once the transaction commits,
+# after the deliveries, and nothing about the alert waits for it.
+def request_summary(session: AsyncSession, check: Check, event: Event) -> None:
+    if check.summary_enabled and event.to_state == State.DOWN and event.run_id is not None:
+        pending: list[int] = session.info.setdefault(PENDING_SUMMARIES_KEY, [])
+        pending.append(event.id)
+
+
 # Queues the deliveries created in a transaction that has now committed. A
 # failure here loses nothing: the rows exist, and the relay will find them.
+# Summaries are not so safe, and don't need to be: one that is lost is just
+# an alert without a summary.
 async def dispatch_pending(session: AsyncSession, dispatcher: Dispatcher) -> None:
     keys: list[DeliveryKey] = session.info.pop(PENDING_KEY, [])
-    if not keys:
-        return
-    try:
-        await dispatcher.deliver(keys)
-    except Exception:
-        log.exception("could not queue %d deliveries; the relay will retry", len(keys))
+    summaries: list[int] = session.info.pop(PENDING_SUMMARIES_KEY, [])
+    if keys:
+        try:
+            await dispatcher.deliver(keys)
+        except Exception:
+            log.exception("could not queue %d deliveries; the relay will retry", len(keys))
+    if summaries:
+        try:
+            await dispatcher.summarize(summaries)
+        except Exception:
+            log.warning("could not queue %d summaries", len(summaries), exc_info=True)
 
 
 # Exponential backoff with "equal jitter": half of the delay is fixed, half is
@@ -107,7 +129,9 @@ def _excerpt(output: str | None) -> str | None:
     return "\n".join(lines)[-OUTPUT_EXCERPT_CHARS:]
 
 
-def build_alert(event: Event, check: Check, run: Run | None, settings: Settings) -> Alert:
+def build_alert(
+    event: Event, check: Check, run: Run | None, settings: Settings, summary: str | None = None
+) -> Alert:
     link = None
     if settings.dashboard_url:
         link = f"{settings.dashboard_url.rstrip('/')}/#/checks/{check.id}"
@@ -122,6 +146,7 @@ def build_alert(event: Event, check: Check, run: Run | None, settings: Settings)
         occurred_at=event.created_at,
         link=link,
         output_excerpt=excerpt,
+        summary=summary,
     )
 
 
@@ -161,7 +186,14 @@ async def deliver(
         check = await session.get_one(Check, event.check_id)
         channel = await session.get_one(Channel, key.channel_id)
         run = await session.get(Run, event.run_id) if event.run_id is not None else None
-        alert = build_alert(event, check, run, settings)
+        # A summary that is ready by now goes out with the alert. One that isn't
+        # is added by editing the message once it arrives (see tocsin.summaries).
+        summary = (
+            await session.scalar(select(Summary.text).where(Summary.run_id == event.run_id))
+            if event.run_id is not None
+            else None
+        )
+        alert = build_alert(event, check, run, settings, summary)
 
         delivery.attempts += 1
         try:

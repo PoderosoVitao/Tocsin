@@ -20,6 +20,7 @@ from tocsin.models import (
     Event,
     Run,
     State,
+    Summary,
     check_channels,
 )
 from tocsin.schedule import ScheduleError, validate
@@ -105,6 +106,7 @@ async def create_check(
         max_duration_seconds=body.max_duration_seconds,
         cooldown_seconds=body.cooldown_seconds,
         reminder_seconds=body.reminder_seconds,
+        summary_enabled=body.summary_enabled,
         eval_rules=body.eval_rules.model_dump(exclude_unset=True) if body.eval_rules else {},
     )
     session.add(check)
@@ -140,6 +142,8 @@ async def update_check(
     now = datetime.now(UTC)
     check = await get_check(session, check_id, lock=True)
     changes = body.model_dump(exclude_unset=True, exclude={"paused", "channel_ids", "eval_rules"})
+    if changes.get("summary_enabled", True) is None:
+        del changes["summary_enabled"]
     if body.eval_rules is not None:
         await _check_rules(session, check, body.eval_rules)
         # Replaces the rules as a whole, keeping only what was set.
@@ -209,8 +213,12 @@ async def list_runs(
     query = select(Run).where(Run.check_id == check_id)
     if before is not None:
         query = query.where(Run.id < before)
-    runs = await session.scalars(query.order_by(Run.id.desc()).limit(limit))
-    return [RunOut.build(run) for run in runs]
+    runs = list(await session.scalars(query.order_by(Run.id.desc()).limit(limit)))
+    rows = await session.execute(
+        select(Summary.run_id, Summary.text).where(Summary.run_id.in_([r.id for r in runs]))
+    )
+    summaries = {run_id: text for run_id, text in rows}
+    return [RunOut.build(run, summaries.get(run.id)) for run in runs]
 
 
 # State changes, newest first, each with the alert deliveries it caused: to

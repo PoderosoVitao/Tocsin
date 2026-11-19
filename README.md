@@ -301,9 +301,8 @@ with nothing retrying it); and the API's health endpoint, when `TOCSIN_SELF_CHEC
 
 ## Redaction
 
-Failure summaries will send a job's output to a third party's model, and that output can hold
-anything the job saw. Before any of it leaves, `tocsin.redact` scrubs it. This is built and
-tested, and the summaries that use it come next.
+Failure summaries send a job's output to a third party's model, and that output can hold
+anything the job saw. Before any of it leaves, `tocsin.redact` scrubs it.
 
 It removes, replacing each with a marker such as `[REDACTED:github-token]`:
 
@@ -331,6 +330,47 @@ jobs' output may leave the machine. The tests plant 27 fake credentials in reali
 messages, connection strings, command lines, JSON, a PEM block) and in random surroundings, and
 check that none survives, and that ordinary diagnostic text passes through unchanged.
 
+## Failure summaries
+
+When a job fails and its output was captured, tocsin can add one line on the likely cause to the
+alert: "Disk full on /mnt/backup". It is **off** until you set up a model, and then only for the
+checks that ask (`"summary_enabled": true`), because it sends the run's output, redacted as above,
+to the model's provider.
+
+```
+TOCSIN_LLM_PROVIDER=anthropic          # anthropic | openai | openai-compatible
+TOCSIN_LLM_API_KEY=...                 # your own key; only ever sent to the provider
+TOCSIN_LLM_MODEL=claude-opus-5-5       # required except for anthropic
+TOCSIN_LLM_BASE_URL=                   # openai: another server; openai-compatible: required
+TOCSIN_SUMMARY_DAILY_LIMIT=100         # summaries per UTC day, then alerts go without
+```
+
+| Provider | Set | Notes |
+|---|---|---|
+| Claude | `anthropic` | Uses the official SDK. The model defaults to `claude-opus-5-5`; a cheaper one such as `claude-haiku-5-5` is plenty for one line. |
+| OpenAI | `openai` | Needs a key and a model. |
+| Anything speaking the OpenAI chat API | `openai-compatible` | OpenRouter, Groq, Together, vLLM, Ollama, LM Studio. Needs `TOCSIN_LLM_BASE_URL` (such as `http://localhost:11434/v1`); the key is optional. |
+
+How it behaves:
+
+- **The alert never waits.** It goes out at once. The summary is asked for afterwards, and when it
+  arrives the sent message is edited to add it (for a message not yet sent, it goes in with it).
+- **It says what it is.** The line is shown in italics, marked "machine-generated, may be wrong".
+  It is also on the run in the API (`summary`).
+- **It fails quietly.** No model set up, a wrong key, a provider outage, a rate limit, a refusal,
+  an empty answer, a failed edit: the alert stands as it was, and the worker logs why. Nothing is
+  retried.
+- **It has a cost cap.** At most `TOCSIN_SUMMARY_DAILY_LIMIT` calls per UTC day; a call that fails
+  still counts, since it may still be billed. If the count can't be kept, no call is made.
+- **The model is told not to obey the output.** Job output is untrusted text that can contain
+  instructions; it is passed as data, and the answer is cut down to one plain line before it is
+  shown.
+
+What the model sees is the check's name, why tocsin raised the alert, the exit code, and the last
+4000 characters of the output after redaction. The tests plant fake secrets in a job's output and
+check that none reaches the model, both for a stand-in model and in the HTTP requests the real
+providers send.
+
 ## Limitations
 
 - **Telegram is the only channel** so far. Email and outgoing webhooks are planned.
@@ -351,7 +391,8 @@ check that none survives, and that ordinary diagnostic text passes through uncha
 | 3. Dashboard | Overview with live updates, check page, alert log, settings | Done |
 | 4. Eval checks | Statistics, result schema and storage, alert rules (floor, regression, not enough data, budget), eval page, JUnit and Stochast adapters | Done |
 | 5. Summaries | Redaction | Done |
-| | LLM summaries (Claude, OpenAI and others), evaluation of the summariser | Next |
+| | Summary worker, with Claude, OpenAI and compatible providers | Done |
+| | Evaluation of the summariser on known failure logs | Next |
 
 ## Development
 
