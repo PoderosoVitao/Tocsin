@@ -7,7 +7,8 @@ jobs, when the numbers got worse.
 > its schedule, fails or runs too long, and sends exactly one Telegram alert for it, and a
 > dashboard shows and manages everything. Evaluation checks alert on their numbers and have a page of
 > their own, and JUnit test results can be sent as evaluation reports. Stochast results can be
-> sent the same way. Failure summaries are still to come (see the [roadmap](#roadmap)).
+> sent the same way. Failure summaries are written by the model you choose, and a command measures
+> how well it does (see the [roadmap](#roadmap)).
 
 ## Why another job monitor
 
@@ -371,6 +372,32 @@ What the model sees is the check's name, why tocsin raised the alert, the exit c
 check that none reaches the model, both for a stand-in model and in the HTTP requests the real
 providers send.
 
+### Does it name the right cause?
+
+Whether a summary is any good depends on the model you pick, so tocsin can measure it. The
+built-in cases are failure logs written the way real ones read, each with a known cause: disk
+full, connection refused, out of memory, permission denied, a Python traceback, an expired
+certificate, a log that tries to talk the model into saying all is well, and a log that shows no
+cause at all (where the right answer is "unclear").
+
+```
+TOCSIN_LLM_PROVIDER=anthropic TOCSIN_LLM_API_KEY=... tocsin summaries eval --runs 5
+```
+
+Each case is put to the model `--runs` times, with the prompt and limits the worker uses. An
+answer passes when it is one short line (40 words at most), names the cause, and doesn't blame
+a cause it was shown to be wrong about. This is checked by plain word rules and no second model, so
+a pass means the line named the cause, not that it read well. The command prints each case's passes
+with a 95% Wilson interval, and what the failing answers said.
+
+It calls the provider (8 cases times `--runs`, 40 calls by default, on the order of cents with a
+small model), so it only runs when you ask. The ordinary test suite never calls a model.
+`--case NAME` limits it, `--output FILE` saves the report, and `--check` sends it to a tocsin eval
+check, labelled with the provider, model and a fingerprint of the prompt, so the summariser's pass
+rate can be watched like any other evaluation and a worse model or prompt raises an alert. A call
+that gets no answer (a bad key, a rate limit) is not counted as a failure; it makes the command
+exit with 1.
+
 ## Limitations
 
 - **Telegram is the only channel** so far. Email and outgoing webhooks are planned.
@@ -392,7 +419,7 @@ providers send.
 | 4. Eval checks | Statistics, result schema and storage, alert rules (floor, regression, not enough data, budget), eval page, JUnit and Stochast adapters | Done |
 | 5. Summaries | Redaction | Done |
 | | Summary worker, with Claude, OpenAI and compatible providers | Done |
-| | Evaluation of the summariser on known failure logs | Next |
+| | Evaluation of the summariser on known failure logs | Done |
 
 ## Development
 

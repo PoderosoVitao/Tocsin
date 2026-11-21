@@ -221,6 +221,83 @@ def _report(args: argparse.Namespace) -> int:
     return 1
 
 
+# Asks the configured model about the built-in failure logs and reports how
+# often its answer names the real cause. This is the one command that calls a
+# model on purpose: it costs a few cents and says so before it starts.
+def _summaries_eval(args: argparse.Namespace) -> int:
+    import httpx
+
+    from tocsin.adapters.send import send_report
+    from tocsin.config import get_settings
+    from tocsin.evalstats import wilson_interval
+    from tocsin.llm import LLMConfigError, build_llm
+    from tocsin.summary_eval import CASES, evaluate, to_report
+
+    cases = [case for case in CASES if not args.case or case.name in args.case]
+    unknown = sorted(set(args.case) - {case.name for case in CASES})
+    if unknown:
+        print(f"tocsin summaries eval: no such case: {', '.join(unknown)}", file=sys.stderr)
+        return 2
+    if args.runs < 1:
+        print("tocsin summaries eval: --runs must be at least 1", file=sys.stderr)
+        return 2
+
+    async def work() -> Any:
+        async with httpx.AsyncClient() as http:
+            llm = build_llm(get_settings(), http)
+            if llm is None:
+                raise LLMConfigError("set TOCSIN_LLM_PROVIDER (and the key and model) first")
+            print(
+                f"asking {llm.provider} ({llm.model}) {len(cases) * args.runs} times: "
+                f"{len(cases)} cases, {args.runs} runs each",
+                file=sys.stderr,
+            )
+            try:
+                return await evaluate(llm, args.runs, cases)
+            finally:
+                await llm.close()
+
+    try:
+        evaluation = asyncio.run(work())
+    except LLMConfigError as exc:
+        print(f"tocsin summaries eval: {exc}", file=sys.stderr)
+        return 2
+
+    report = to_report(evaluation, args.report_url)
+    print(f"{'case':<26} {'passed':>8}  95% interval")
+    for result in evaluation.results:
+        if result.runs:
+            low, high = wilson_interval(result.passes, result.runs)
+            print(
+                f"{result.case.name:<26} {result.passes:>3}/{result.runs:<4}  "
+                f"{low:.0%} to {high:.0%}"
+            )
+        else:
+            print(f"{result.case.name:<26} no answers")
+        for reason, text in result.failures:
+            print(f"    failed ({reason}): {text[:200]!r}")
+        for message in sorted(set(result.errors)):
+            print(f"    no answer: {message}")
+    runs = sum(result.runs for result in evaluation.results)
+    passes = sum(result.passes for result in evaluation.results)
+    tokens = sum(r.input_tokens + r.output_tokens for r in evaluation.results)
+    print(f"overall {passes}/{runs}; {tokens} tokens used")
+
+    if args.output:
+        with open(args.output, "w") as out:
+            json.dump(report, out, indent=2)
+            out.write("\n")
+    if args.check and report["scenarios"]:
+        sent = send_report(_ping_url(args), report, args.timeout)
+        if sent.result != "accepted":
+            print(f"tocsin summaries eval: could not report ({sent.message})", file=sys.stderr)
+            return 1
+        print("reported to tocsin")
+    # Failing answers are the result, not an error; only a run that could not
+    # ask the model (or got no answers) fails the command.
+    return 1 if evaluation.errors else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tocsin", description="A job monitor that understands AI jobs."
@@ -335,6 +412,36 @@ def build_parser() -> argparse.ArgumentParser:
         "a results file Stochast saved, or the directory of them",
         "the report's suite name (default: stochast)",
     )
+
+    summaries = commands.add_parser(
+        "summaries", help="failure summaries: check how well the model names a cause"
+    ).add_subparsers(dest="summaries_command", required=True)
+    evaluation = summaries.add_parser(
+        "eval",
+        help="ask the configured model about known failure logs and report the pass rate",
+        description=(
+            "Uses TOCSIN_LLM_PROVIDER, TOCSIN_LLM_API_KEY and TOCSIN_LLM_MODEL. "
+            "Calls the provider cases x runs times, which costs a little."
+        ),
+    )
+    evaluation.add_argument(
+        "--runs", type=int, default=5, help="times to ask about each case (default: 5)"
+    )
+    evaluation.add_argument(
+        "--case", action="append", default=[], help="only this case (repeatable)"
+    )
+    evaluation.add_argument("--output", metavar="FILE", help="also write the report to a file")
+    evaluation.add_argument("--check", default=os.environ.get("TOCSIN_CHECK"), help=check_help)
+    evaluation.add_argument(
+        "--server",
+        default=os.environ.get("TOCSIN_URL", "http://localhost:8000"),
+        help=server_help,
+    )
+    evaluation.add_argument("--report-url", help="a link to more about this run")
+    evaluation.add_argument(
+        "--timeout", type=float, default=10, help="seconds to wait for tocsin (default: 10)"
+    )
+    evaluation.set_defaults(handler=_summaries_eval)
     return parser
 
 
