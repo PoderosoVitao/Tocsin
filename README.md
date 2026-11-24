@@ -357,7 +357,8 @@ How it behaves:
 - **The alert never waits.** It goes out at once. The summary is asked for afterwards, and when it
   arrives the sent message is edited to add it (for a message not yet sent, it goes in with it).
 - **It says what it is.** The line is shown in italics, marked "machine-generated, may be wrong".
-  It is also on the run in the API (`summary`).
+  It is also on the run in the API (`summary`) and on the check page of the dashboard, where the
+  check form has a switch for it.
 - **It fails quietly.** No model set up, a wrong key, a provider outage, a rate limit, a refusal,
   an empty answer, a failed edit: the alert stands as it was, and the worker logs why. Nothing is
   retried.

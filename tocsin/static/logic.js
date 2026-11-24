@@ -208,6 +208,7 @@ export function formToCheckBody(form) {
     max_duration_seconds: seconds(form.maxRun, 60),
     cooldown_seconds: seconds(form.cooldown, 60),
     reminder_seconds: seconds(form.reminder, 3600),
+    summary_enabled: Boolean(form.summary),
   };
 }
 
@@ -221,6 +222,7 @@ export function checkToForm(check) {
     maxRun: minutes(check.max_duration_seconds),
     cooldown: minutes(check.cooldown_seconds),
     reminder: check.reminder_seconds ? String(check.reminder_seconds / 3600) : "",
+    summary: Boolean(check.summary_enabled),
   };
 }
 

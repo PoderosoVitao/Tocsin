@@ -193,6 +193,7 @@ a { color: var(--accent); }
 .delivery.retrying { color: var(--warn-ink); }
 details { margin-top: 4px; }
 summary { cursor: pointer; color: var(--ink-secondary); }
+.run-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
 pre.output { margin: 6px 0 0; padding: 8px 10px; background: var(--surface-sunken); border: 1px solid var(--border); border-radius: 6px; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 
 /* On a phone each check becomes a card: name and state on top, details below. */

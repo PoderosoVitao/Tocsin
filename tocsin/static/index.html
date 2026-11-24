@@ -178,6 +178,10 @@
         <div class="field"><label for="f-maxrun">Longest run allowed (minutes)</label><input id="f-maxrun" type="number" min="0" step="any" placeholder="no limit" /></div>
         <div class="field"><label for="f-reminder">Remind while down, every (hours)</label><input id="f-reminder" type="number" min="0" step="any" placeholder="never" /></div>
       </div>
+      <div class="field">
+        <label class="check-label"><input id="f-summary" type="checkbox" /> Add a machine-written line on the likely cause to failure alerts</label>
+        <p class="hint">Sends the run's output, with secrets removed, to the language model's provider. Needs a model set up on the server; without one nothing is sent.</p>
+      </div>
       <fieldset class="field" id="f-channels-box">
         <legend>Alert these channels</legend>
         <div id="f-channels"></div>

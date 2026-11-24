@@ -171,6 +171,11 @@ function runRow(run) {
   time.title = relativeTime(run.finished_at ?? run.started_at);
   main.append(time);
   row.append(main);
+  if (run.summary) {
+    const line = el("div", "row-sub run-summary");
+    line.append(el("em", "", run.summary), el("span", "tag", "machine-generated"));
+    row.append(line);
+  }
   if (run.output_tail) {
     const output = el("details");
     output.append(el("summary", "", "Output"), el("pre", "output", run.output_tail));
@@ -211,6 +216,7 @@ function renderDetail() {
     fact("Longest run allowed", check.max_duration_seconds ? formatSpan(check.max_duration_seconds) : "no limit"),
     fact("Cooldown", check.cooldown_seconds ? formatSpan(check.cooldown_seconds) : "none"),
     fact("Reminders while down", check.reminder_seconds ? `every ${formatSpan(check.reminder_seconds)}` : "off"),
+    fact("Failure summaries", check.summary_enabled ? "on" : "off"),
     fact("Alerts go to", `${check.channel_ids.length} channel${check.channel_ids.length === 1 ? "" : "s"}`),
     fact("Ping URL", check.ping_url),
   );
@@ -772,6 +778,7 @@ function openCheckDialog(check = null) {
         maxRun: "",
         cooldown: "5",
         reminder: "",
+        summary: false,
       };
   $("check-dialog-title").textContent = check ? `Edit ${check.name}` : "New check";
   $("f-name").value = values.name;
@@ -781,6 +788,7 @@ function openCheckDialog(check = null) {
   $("f-maxrun").value = values.maxRun;
   $("f-cooldown").value = values.cooldown;
   $("f-reminder").value = values.reminder;
+  $("f-summary").checked = values.summary;
   const chosen = new Set(check ? check.channel_ids : settings.channels.map((c) => c.id));
   $("f-channels").replaceChildren(
     ...(settings.channels.length
@@ -810,6 +818,7 @@ $("check-form").addEventListener("submit", async (event) => {
     maxRun: $("f-maxrun").value,
     cooldown: $("f-cooldown").value,
     reminder: $("f-reminder").value,
+    summary: $("f-summary").checked,
   });
   if (!body.name || !body.schedule || body.grace_seconds === null || body.cooldown_seconds === null) {
     return showFormError("check-form-error", new Error("Name, schedule, grace period and cooldown are required."));
